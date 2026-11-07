@@ -21,6 +21,8 @@ pub enum MenuId {
     Detail,
     Sound,
     Lang,
+    /// OPTIONS -> LANGUAGE (port addition): the language list plus a way back
+    Language,
     PauseRoot,
     Controls,
     PauseZoom,
@@ -90,6 +92,15 @@ fn bar(lang: usize, n: usize, filled: usize, total: usize) -> Vec<u8> {
     v
 }
 
+/// The language menu's items: the original order EN, DE, FR, IT, ES, then the port's additions.
+fn language_items() -> Vec<Item> {
+    [0, 1, 2, 4, 3]
+        .into_iter()
+        .chain(5..crate::data::strings::count())
+        .map(|n| item(crate::data::strings::to_cp437(crate::data::strings::language_name(n)), Act::Action(ActId::Lang(n))))
+        .collect()
+}
+
 /// Items of a menu with the current settings.
 pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item> {
     let cfg = &*ctx.cfg;
@@ -121,6 +132,7 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             Item { adjustable: true, ..item(onoff(l, 84, computer_players()), Act::Value(ValId::ComputerPlayers)) },
             Item { adjustable: true, ..item(bar(l, 85, cfg.difficulty() as usize, 3), Act::Value(ValId::Difficulty)) },
             item(keys::label(l, keys::L_CONTROLS), Act::Open(MenuId::Controls)),
+            item(crate::data::strings::to_cp437(crate::data::strings::named(l, "language_menu")), Act::Open(MenuId::Language)),
             item(st(l, 51), Act::Back),
         ],
         MenuId::Detail => vec![
@@ -149,13 +161,12 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             },
             item(st(l, 56), Act::Back),
         ],
-        MenuId::Lang => vec![
-            item(b"ENGLISH".to_vec(), Act::Action(ActId::Lang(0))),
-            item(b"DEUTSCH".to_vec(), Act::Action(ActId::Lang(1))),
-            item(b"FRANCAIS".to_vec(), Act::Action(ActId::Lang(2))),
-            item(b"ITALIANO".to_vec(), Act::Action(ActId::Lang(4))),
-            item(crate::data::strings::to_cp437("ESPAÑOL"), Act::Action(ActId::Lang(3))),
-        ],
+        MenuId::Lang => language_items(),
+        MenuId::Language => {
+            let mut v = language_items();
+            v.push(item(st(l, 56), Act::Back));
+            v
+        }
         MenuId::PauseRoot => vec![
             Item { hidden: !sound, ..item(st(l, 93), Act::Open(MenuId::Sound)) },
             item(st(l, 72), Act::Open(MenuId::Detail)),
@@ -293,7 +304,19 @@ impl MenuState {
     }
     pub fn open(&mut self, m: MenuId, ctx: &Ctx) {
         let it = items(m, ctx, None);
-        self.stack.push((m, first_visible(&it)));
+        let mut c = first_visible(&it);
+        if m == MenuId::Language {
+            // start on the current language
+            let cur = ctx.cfg.language();
+            c = it.iter().position(|i| matches!(i.act, Act::Action(ActId::Lang(n)) if n == cur)).unwrap_or(c);
+        }
+        self.stack.push((m, c));
+    }
+    /// Close the top submenu.
+    pub fn back(&mut self) {
+        if self.stack.len() > 1 {
+            self.stack.pop();
+        }
     }
     /// Fix a cursor that points at a hidden item.
     fn fix_cursor(&mut self, it: &[Item]) {

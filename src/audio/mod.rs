@@ -43,6 +43,29 @@ impl Audio {
         Audio::with(false, Arc::new(Mutex::new(Shared::new(44100))), None)
     }
 
+    /// An enabled audio system without an output device; pull samples with [`Audio::render`].
+    #[allow(dead_code)] // used by examples/audio_test
+    pub fn new_offline(rate: u32) -> Audio {
+        Audio::with(true, Arc::new(Mutex::new(Shared::new(rate))), None)
+    }
+
+    /// Mix the next `out.len() / 2` stereo frames (interleaved L R) — offline use only.
+    #[allow(dead_code)] // used by examples/audio_test
+    pub fn render(&mut self, out: &mut [f32]) {
+        self.lock().mix(out);
+    }
+
+    /// Whether sound output is working.
+    #[allow(dead_code)] // used by examples/audio_test
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    #[allow(dead_code)] // used by examples/audio_test
+    pub fn is_playing(&self, owner: u32, sample: u16) -> bool {
+        self.enabled && self.lock().find(owner, sample).is_some()
+    }
+
     fn with(enabled: bool, shared: Arc<Mutex<Shared>>, stream: Option<cpal::Stream>) -> Audio {
         Audio { enabled, shared, _stream: stream, sound_dat: None, timbres: None, tunes: None }
     }
@@ -81,7 +104,7 @@ impl Audio {
             .into_iter()
             .map(|it| {
                 let d = crate::data::rnc::maybe_unpack(it.data).unwrap_or_default();
-                Arc::new(wav::parse(&d))
+                Arc::new(wav::parse(&it.name, &d))
             })
             .collect())
     }

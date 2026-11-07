@@ -31,6 +31,19 @@ Options:
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
 
+## Languages
+
+The UI text is loaded at start-up from `lang/<code>.txt` in the data directory: `en`, `de`, `fr`,
+`es`, `it` (the original five) and `pl` (Polish, added by this port). These files are part of the
+repository; the rest of `resources/` is not. Each line is `key = text` in UTF-8; keys `000`..`193`
+are the original string table, the named keys (`language`, controls-menu labels) are port additions.
+Missing entries fall back to English; `en.txt` is required.
+
+The language menu appears on the first run (no `config.dat`) and under OPTIONS → LANGUAGE (port
+addition); in the menus Alt+1..4 switch to English / German / French / Spanish, as in the original.
+The original fonts have no Polish letters, so Ą Ć Ę Ł Ń Ó Ś Ź Ż are drawn as A C E L N O S Z for
+now. `cargo test` checks that every language file is complete.
+
 ## Controls (race)
 
 | Action | Keys |

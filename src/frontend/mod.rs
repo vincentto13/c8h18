@@ -483,7 +483,10 @@ impl FrontEnd {
                 }
                 ActId::ChangeName => self.start_name(ctx),
                 ActId::Joystick => {}
-                ActId::Lang(l) => ctx.cfg.set_language(l),
+                ActId::Lang(l) => {
+                    ctx.cfg.set_language(l);
+                    self.menu.back();
+                }
                 ActId::ResetKeys => keys::reset(),
             },
             _ => {}

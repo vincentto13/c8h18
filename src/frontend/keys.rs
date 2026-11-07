@@ -211,31 +211,19 @@ fn key_label(k: KeyCode) -> &'static str {
     KEYS.iter().find(|e| e.0 == k).map(|e| e.2).unwrap_or("?")
 }
 
-// ---- labels (port addition, all five languages: EN, DE, FR, ES, IT) ----
+// ---- labels (port addition; text from the language files' named entries) ----
 pub const L_CONTROLS: usize = 0;
 pub const L_PAUSE_ZOOM: usize = 8;
 pub const L_RESET: usize = 12;
 const L_PRESS: usize = 13;
 
-const LABELS: [[&str; 5]; 14] = [
-    ["CONTROLS", "STEUERUNG", "COMMANDES", "CONTROLES", "COMANDI"],
-    ["ACCELERATE", "GAS", "ACCELERER", "ACELERAR", "ACCELERA"],
-    ["BRAKE", "BREMSE", "FREINER", "FRENAR", "FRENA"],
-    ["LEFT", "LINKS", "GAUCHE", "IZQUIERDA", "SINISTRA"],
-    ["RIGHT", "RECHTS", "DROITE", "DERECHA", "DESTRA"],
-    ["MINIGUN", "KNARRE", "MITRAILLEUSE", "CAÑON", "MITRAGLIATRICE"],
-    ["MISSILE", "RAKETEN", "MISSILES", "MISILES", "RAZZI"],
-    ["BOOSTER", "BOOSTER", "TURBO", "PROPULSOR", "BOOSTER"],
-    ["PAUSE AND ZOOM", "PAUSE UND ZOOM", "PAUSE ET ZOOM", "PAUSA Y ZOOM", "PAUSA E ZOOM"],
-    ["PAUSE", "PAUSE", "PAUSE", "PAUSA", "PAUSA"],
-    ["ZOOM IN", "ZOOM NAH", "ZOOM AVANT", "ACERCAR", "ZOOM AVANTI"],
-    ["ZOOM OUT", "ZOOM FERN", "ZOOM ARRIERE", "ALEJAR", "ZOOM INDIETRO"],
-    ["RESET TO DEFAULTS", "STANDARD WIEDERHERSTELLEN", "VALEURS PAR DEFAUT", "VALORES INICIALES", "RIPRISTINA DEFAULT"],
-    ["PRESS A KEY", "TASTE DRÜCKEN", "APPUYEZ SUR UNE TOUCHE", "PULSA UNA TECLA", "PREMI UN TASTO"],
+const LABEL_KEYS: [&str; 14] = [
+    "controls", "accelerate", "brake", "left", "right", "minigun", "missile", "booster", "pause_zoom", "pause", "zoom_in",
+    "zoom_out", "reset_keys", "press_key",
 ];
 
 pub fn label(lang: usize, n: usize) -> Vec<u8> {
-    crate::data::strings::to_cp437(LABELS[n][lang.min(4)])
+    crate::data::strings::to_cp437(crate::data::strings::named(lang, LABEL_KEYS[n]))
 }
 
 fn action_label(a: Action) -> usize {

@@ -1,208 +1,96 @@
-//! UI string tables (spec 02 appendix A). PUBLIC API IS FIXED.
+//! UI strings (spec 02 appendix A), loaded at start-up from `lang/<code>.txt` in the data directory.
+//!
+//! File format: UTF-8, one `<key> = <text>` per line, `#` starts a comment line. Keys `000`..`193`
+//! are the original string table; named keys (`language`, the controls-menu labels) are port
+//! additions. Missing entries fall back to English.
+use std::collections::HashMap;
+use std::sync::OnceLock;
 
-/// [string][language 0 EN, 1 DE, 2 FR, 3 ES, 4 IT]
-static STRINGS: [[&str; 5]; 194] = [
-    ["NULL", "NULL", "NUL", "NULA", "NIENTE"],
-    ["DEAD MEAT", "DAS WAR'S DANN WOHL", "VIANDE FROIDE", "DATE POR MUERTO!", "SPACCIATO"],
-    ["FUEL LOW", "SPRIT WIRD KNAPP", "ALARME CARBURANT", "GASOLINA ESCASA", "SCARSA BENZINA"],
-    ["SHIELD LOW", "SCHILD IST NIEDRIG", "ALARME BLINDAGE", "ESCUDO DEBIL", "SCARSO SCUDO"],
-    ["AMMO LOW", "MUNI WIRD KNAPP", "ALARME MUNITIONS", "MUNICION ESCASA", "SCARSE MUNIZIONI"],
-    ["FUEL EMPTY", "SPRIT IST LEER", "PANNE CARBURANT", "SIN GASOLINA", "SENZA BENZINA"],
-    ["SHIELD EMPTY", "SCHILD IST LEER", "BLINDAGE DETRUIT", "SIN ESCUDO", "SENZA SCUDO"],
-    ["AMMO EMPTY", "MUNI IST LEER", "MUNITIONS EPUISEES", "SIN MUNICION", "SENZA MUNIZIONI"],
-    ["FUEL RECHARGING", "SPRIT NACHGETANKT", "PLEIN CARBURANT", "CARGANDO GASOLINA", "RICARICA BENZINA"],
-    ["SHIELD RECHARGING", "SCHILD AUFGELADEN", "ECHANGE BLINDAGE", "CARGANDO ESCUDO", "RICARICA SCUDO"],
-    ["AMMO RECHARGING", "MUNI NEU GELADEN", "REAPPRO MUNITIONS", "CARGANDO MUNICION", "RICARICA MUNIZIONI"],
-    ["FUEL FULL", "SPRIT IST VOLL", "CARBURANT OK", "GASOLINA: REPLETO", "SERBATOIO PIENO"],
-    ["SHIELD FULL", "SCHILD IST VOLL", "BLINDAGE OK", "ESCUDO: COMPLETO", "SCUDO COMPLETO"],
-    ["AMMO FULL", "MUNI IST VOLL", "MUNITIONS OK", "MUNICION: COMPLETA", "ARMI COMPLETE"],
-    ["EXTRA FUEL", "EXTRA SPRIT", "BONUS CARBURANT", "GASOLINA EXTRA", "EXTRA CARBURANTE"],
-    ["EXTRA SHIELD", "EXTRA SCHILD", "BONUS BLINDAGE", "ESCUDO EXTRA", "EXTRA SCUDO"],
-    ["EXTRA AMMO", "EXTRA MUNI", "BONUS MUNITIONS", "MUNICION EXTRA", "EXTRA MUNIZIONI"],
-    ["MAX FUEL", "MAX. SPRIT", "CARBURANT MAXI", "MAXIMA GASOLINA", "MASSIMO CARBURANTE"],
-    ["MAX SHIELD", "MAX. SCHILD", "BLINDAGE MAXI", "MAXIMO ESCUDO", "MASSIMO SCUDO"],
-    ["MAX AMMO", "MAX. MUNI", "MUNITIONS MAXI", "MAXIMA MUNICION", "ARMAMENTO MASSIMO"],
-    ["DOUBLE FUEL", "ZWEIFACH-SPRIT", "CARBURANT X2", "GASOLINA DOBLE", "DOPPIO CARBURANTE"],
-    ["DOUBLE SHIELD", "ZWEIFACH-SCHILD", "BLINDAGE X2", "ESCUDO DOBLE", "DOPPIO SCUDO"],
-    ["DOUBLE AMMO", "ZWEIFACH-MUNI", "MUNITIONS X2", "MUNICION DOBLE", "DOPPIE MUNIZIONI"],
-    ["MINIGUN UPGRADED", "BESSERE KNARRE", "MITRAILLEUSE SURP.", "MEJORA: CAÑON", "POTENZIAMENTO ARMA"],
-    ["MISSILE UPGRADED", "BESSERE RAKETEN", "MISSILES SURP.", "MEJORA: MISILES", "POTENZIAMENTO RAZZI"],
-    ["BOOSTER UPGRADED", "BESSERER BOOSTER", "TURBO SURP.", "MEJORA: PROPULSOR", "INCREMENTO BOOSTER"],
-    ["AUTO PILOT ON", "AUTO-PILOT AN", "MODE PILOTE AUTO", "AUTO-PILOTO ON", "AUTO PILOTA ON"],
-    ["AUTO PILOT OFF", "AUTO-PILOT AUS", "MODE MANUEL", "AUTO-PILOTO OFF", "AUTO PILOTA OFF"],
-    ["AUTO REPAIR", "AUTOM. REPARATUR", "REPARATION AUTO", "AUTO-REPARACION", "AUTORIPARAZIONE"],
-    ["AUTO REFUEL", "AUTOM. AUFTANKEN", "PLEIN AUTOMATIQUE", "AUTO-REPOSTAJE", "AUTORICARICA"],
-    ["CALLING REPAIR", "RUFE WERKSTATT", "REPARATION A FAIRE", "ESPERA REPARACION", "ATTESA RIPARAZIONE"],
-    ["AWAITING REPAIR", "MONTEUR UNTERWEGS", "REPARATION REQUISE", "AUXILIAR EN PISTA", "VEICOLO IN ARRIVO"],
-    ["REPAIRING", "MONTEUR ANGEKOMMEN", "REPARATION", "AUXILIAR AQUI", "PRESENZA VEICOLO"],
-    ["DEATH MATCH", "FREISTIL", "COMBAT A MORT", "DUELO A MUERTE", "SCONTRO MORTALE"],
-    ["ENTER NAME", "NAME EINGEBEN", "TAPEZ VOTRE NOM", "INTRODUZCA NOMBRE", "DIGITA NOME"],
-    ["RACE", "RENNEN", "COURSE", "CARRERA", "GARA"],
-    ["SELECT TRACK", "BAHN WÄHLEN", "CHOIX DE LA PISTE", "ESCOGER PISTA", "SELEZIONA CIRCUITO"],
-    ["SELECT CAR", "WAGEN WÄHLEN", "CHOIX DU VEHICULE", "ESCOGER COCHE", "SELEZIONA AUTO"],
-    ["HISCORES", "HIGHSCORES", "MEILLEURS SCORES", "RECORDS", "CLASSIFICA"],
-    ["LAP TIMES", "RUNDENZEITEN", "TEMPS AU TOUR", "TIEMPO VUELTA", "TEMPO DEL GIRO"],
-    ["BEST LAP", "BESTE RUNDE", "MEILLEUR TOUR", "MEJOR VUELTA", "MIGLIOR GIRO"],
-    ["BEST RACE", "BESTES RENNEN", "MEILLEURE COURSE", "MEJOR CARRERA", "MIGLIOR GARA"],
-    ["TRACK NUMBER", "BAHN NUMMER", "PISTE NUMERO", "PISTA NUMERO", "CIRCUITO NUMERO"],
-    ["CHAMPIONSHIP POINTS", "MEISTERSCHAFTSPUNKTE", "POINTS AU CHAMPIONNAT", "PUNTUACION CAMPEONATO", "PUNTI CAMPIONATO"],
-    ["RACE TEAM POINTS", "TEAM-PUNKTE", "POINTS PAR EQUIPE", "PUNTUACION EQUIPOS", "PUNTI COSTRUTTORI"],
-    ["SINGLE RACE", "EINZELRENNEN", "COURSE UNIQUE", "UNA CARRERA", "GARA SINGOLA"],
-    ["CLONE RACE", "DOPPELGÄNGERRENNEN", "COURSE POURSUITE", "CARRERA CLONICA", "GIRO DI PROVA"],
-    ["CHAMPIONSHIP", "MEISTERSCHAFT", "CHAMPIONNAT", "CAMPEONATO", "CAMPIONATO"],
-    ["OPTIONS", "OPTIONEN", "OPTIONS", "OPCIONES", "OPZIONI"],
-    ["QUIT TO DOS", "ZURÜCK ZU DOS", "RETOUR AU DOS", "SALIR AL DOS", "ESCI AL DOS"],
-    ["CHANGE NAME", "NEUER NAME", "CHANGER DE NOM", "CAMBIAR NOMBRE", "CAMBIA NOME"],
-    ["MAIN MENU", "HAUPTMENÜ", "MENU PRINCIPAL", "MENU PRINCIPAL", "MENU' PRINCIPALE"],
-    ["REINITIALISE DIGISTICK", "JOYSTICK NEU INITIALISIEREN", "REINITIALISER JOYSTICK", "REINICIALIZAR JOYSTICK", "REINIZIALIZZA  DIGISTICK"],
-    ["MUSIC VOLUME", "LAUTSTÄRKE MUSIK", "MUSIQUE", "VOLUMEN MUSICA", "VOLUME MUSICA"],
-    ["EFFECTS VOLUME", "LAUTSTÄRKE SFX", "EFFETS SPECIAUX", "VOLUMEN EFECTOS", "VOLUME EFFETTI"],
-    ["CLEAR HISCORES", "HIGHSCORES LÖSCHEN", "EFFACER LES SCORES", "BORRAR RECORDS", "CANCELLA CLASSIFICA"],
-    ["MAIN OPTIONS", "ZURÜCK ZU OPTIONEN", "RETOUR", "OPCIONES PRINCIPALES", "OPZIONI GENERALI"],
-    ["NETWORK ON", "NETZWERK EIN", "RESEAU OUI", "RED ON", "RETE ON"],
-    ["NETWORK OFF", "NETZWERK AUS", "RESEAU NON", "RED OFF", "RETE OFF"],
-    ["CONTINUE GAME", "WEITERSPIELEN", "CONTINUER", "CONTINUAR PARTIDA", "CONTINUA GIOCO"],
-    ["ABORT GAME", "ABBRECHEN", "ABANDONNER", "CANCELAR PARTIDA", "ESCI DAL GIOCO"],
-    ["ARE YOU SURE", "SIND SIE SICHER?", "CONFIRMEZ", "ESTAS SEGURO?", "SEI SICURO"],
-    ["YES", "JA", "OUI", "SI", "SI'"],
-    ["NO", "NEIN", "NON", "NO", "NO"],
-    ["WHITE", "WEISS", "BLANC", "BLANCO", "BIANCO"],
-    ["BLACK", "SCHWARZ", "NOIR", "NEGRO", "NERO"],
-    ["RED", "ROT", "ROUGE", "ROJO", "ROSSO"],
-    ["YELLOW", "GELB", "JAUNE", "AMARILLO", "GIALLO"],
-    ["BLUE", "BLAU", "BLEU", "AZUL", "BLU"],
-    ["ORANGE", "ORANGE", "ORANGE", "NARANJA", "ARANCIONE"],
-    ["PURPLE", "LILA", "VIOLET", "PURPURA", "VIOLA"],
-    ["AQUA-GREEN", "GRÜN", "BLEU-VERT", "VERDE", "ACQUA MARINA"],
-    ["DETAIL OPTIONS", "DETAIL-WAHL", "OPTIONS GRAPHIQUES", "OPCIONES DETALLE", "DETTAGLIO OPZIONI"],
-    ["SKY ON", "HIMMEL AN", "CIEL OUI", "CIELO ON", "CIELO ON"],
-    ["SKY OFF", "HIMMEL AUS", "CIEL NON", "CIELO OFF", "CIELO OFF"],
-    ["SHADING ON", "SCHATTIERUNG AN", "OMBRAGES OUI", "SOMBREADO ON", "OMBREGGIATURA ON"],
-    ["SHADING OFF", "SCHATTIERUNG AUS", "OMBRAGES NON", "SOMBREADO OFF", "OMBREGGIATURA OFF"],
-    ["SPLITTING LEVEL", "DETAIL-LEVEL", "DETAIL DES OBJETS", "NIVEL DE DETALLE", "DIVISIONE LIVELLI"],
-    ["TEXTURE MAPPING ON", "TEXTURE-MAPPING AN", "TEXTURES OUI", "MAPEADO DE TEXTURAS ON", "MAPPATURA TEXTURE ON"],
-    ["TEXTURE MAPPING OFF", "TEXTURE-MAPPING AUS", "TEXTURES NON", "MAPEADO DE TEXTURAS OFF", "MAPPATURA TEXTURE OFF"],
-    ["SCREEN SIZE", "BILDSCHIRMGRÖSSE", "TAILLE ECRAN", "TAMAÑO DE PANTALLA", "DIMENSIONE SCHERMO"],
-    ["SCREEN RESOLUTION", "BILDSCHIRMAUFLÖSUNG", "RESOLUTION", "RESOLUCION PANTALLA", "RISOLUZIONE SCHERMO"],
-    ["320 X 200 256 COLOURS", "320X200 256 FARBEN", "320 X 200 256 COULEURS", "320 X 200 256 COLORES", "320 X 200 256 COLORI"],
-    ["640 X 480 256 COLOURS", "640X480 256 FARBEN", "640 X 480 256 COULEURS", "640 X 480 256 COLORES", "640 X 480 256 COLORI"],
-    ["COMPUTER PLAYERS", "COMPUTERGEGNER", "JOUEURS CYBERNETIQUES", "JUGADORES ORDENADOR", "CONTROLLO COMPUTER"],
-    ["DIFFICULTY LEVEL", "SCHWIERIGKEITSGRAD", "NIVEAU DE DIFFICULTE", "NIVEL DE DIFICULTAD", "LIVELLO DIFFICOLTA'"],
-    ["SESSION NUMBER", "NETZWERKSPIEL", "SESSION NUMERO", "SESION NUMERO", "NUMERO SESSIONE"],
-    ["LOADING LEVEL", "LEVEL WIRD GELADEN", "NIVEAU EN CHARGEMENT", "CARGANDO NIVEL", "CARICA LIVELLO"],
-    ["ATTEMPTING CONNECTION", "VERSUCHE VERBINDUNG", "ESSAI DE CONNEXION", "INTENTANDO LA CONEXION", "ATTESA CONNESSIONE"],
-    ["NETWORK OPTIONS", "NETZWERK-OPTIONEN", "OPTIONS DE RESEAU", "OPCIONES DE RED", "OPZIONI DI RETE"],
-    ["NUMBER OF CHANNELS", "ZAHL DER KANÄLE", "NOMBRE DE VOIES", "NUMERO DE CANALES", "NUMERO DI CANALI"],
-    ["STEREO ON", "STEREO AN", "STEREO OUI", "ESTEREO ON", "STEREO ON"],
-    ["STEREO OFF", "STEREO AUS", "STEREO NON", "ESTEREO OFF", "STEREO OFF"],
-    ["SOUND OPTIONS", "SOUND-OPTIONEN", "OPTIONS SONORES", "OPCIONES DE SONIDO", "OPZIONI SUONO"],
-    ["AVERAGE LAP", "DURCHSCHNITTLICHE RUNDE", "CHRONO AU TOUR", "VUELTA MEDIA", "MEDIA GIRO"],
-    ["NUMBER OF LAPS", "ZAHL DER RUNDEN", "NOMBRE DE TOURS", "NUMERO DE VUELTAS", "NUMERO DI GIRI"],
-    ["WEIGHT", "GEWICHT", "POIDS", "PESO", "PESO"],
-    ["ARMOUR", "PANZERUNG", "BLINDAGE", "BLINDAJE", "ARMATURA"],
-    ["SPEED", "GESCHWINDIGKEIT", "VITESSE", "VELOCIDAD", "VELOCITA'"],
-    ["FIREPOWER", "FEUERKRAFT", "PUISSANCE DE FEU", "POTENCIA DE FUEGO", "POTENZA DI FUOCO"],
-    ["NAME", "NAME", "NOM", "NOMBRE", "NOME"],
-    ["OVERALL TIME", "GESAMTZEIT", "TEMPS TOTAL", "TIEMPO TOTAL", "TEMPO TOTALE"],
-    ["TIME", "ZEIT", "TEMPS", "TIEMPO", "TEMPO"],
-    ["LAP TIME", "RUNDENZEIT", "TEMPS AU TOUR", "TIEMPO VUELTA", "TEMPO DEL GIRO"],
-    ["RACE TIME", "GESAMTZEIT", "TEMPS DE COURSE", "TIEMPO CARRERA", "TEMPO GARA"],
-    ["VEHICLE", "WAGEN", "VEHICULE", "VEHICULO", "VEICOLO"],
-    ["POINTS", "PUNKTE", "POINTS", "PUNTOS", "PUNTI"],
-    ["NEW FASTEST LAP", "NEUE SCHNELLSTE RUNDE", "NOUVEAU MEILLEUR TEMPS AU TOUR", "NUEVA VUELTA RECORD", "RECORD SUL GIRO"],
-    ["NEW FASTEST RACE", "NEUES SCHNELLSTES RENNEN", "NOUVEAU MEILLEUR TEMPS DE COURSE", "NUEVA CARRERA RECORD", "RECORD GARA"],
-    ["NEW", "NEU", "NOUVEAU", "NUEVO", "NUOVO"],
-    ["BEST", "TOP", "MEILLEUR", "EL MEJOR", "MIGLIORE"],
-    ["HIT ACCURACY", "TREFFSICHERHEIT", "PRECISION DE TIR", "PRECISION DE TIRO", "PRECISIONE DI FUOCO"],
-    ["RATING", "BEWERTUNG", "APPRECIATION", "CLASIFICACION", "CLASSIFICA"],
-    ["DEATHS", "EIGENE TOTALSCHÄDEN", "DESTRUCTIONS PAR L'ENNEMI", "MUERTES", "MORTI"],
-    ["KILLS", "GELANDETE VOLLTREFFER", "ENNEMIS DETRUITS", "RIVALES ELIMINADOS", "VITTIME"],
-    ["FUEL USED", "SPRITVERBRAUCH", "CARBURANT UTILISE", "GASOLINA CONSUMIDA", "BENZINA CONSUMATA"],
-    ["FIRE POWER USED", "VERBRAUCHTE MUNITION", "MUNITIONS UTILISEES", "POTENCIA DE FUEGO USADA", "MUNIZIONI UTILIZZATE"],
-    ["ARMOUR USED", "VERBRAUCHTE SCHUTZSCHILDE", "BLINDAGE DETRUIT", "BLINDAJE USADO", "ARMATURA USATA"],
-    ["CONGRATULATIONS", "HERZLICHEN GLÜCKWUNSCH", "FELICITATIONS", "FELICIDADES", "CONGRATULAZIONI"],
-    ["YOU HAVE COME FIRST", "SIE WAREN ERSTER", "VOUS TERMINEZ EN 1ERE POSITION", "ERES EL PRIMERO", "SEI ARRIVATO PRIMO"],
-    ["YOU HAVE COME SECOND", "SIE WAREN ZWEITER", "VOUS TERMINEZ EN 2EME POSITION", "ERES EL SEGUNDO", "SEI ARRIVATO SECONDO"],
-    ["YOU HAVE COME THIRD", "SIE WAREN DRITTER", "VOUS TERMINEZ EN 3EME POSITION", "ERES EL TERCERO", "SEI ARRIVATO TERZO"],
-    ["FIRST", "ERSTER", "PREMIERE", "PRIMERO", "PRIMO"],
-    ["SECOND", "ZWEITER", "SECONDE", "SEGUNDO", "SECONDO"],
-    ["THIRD", "DRITTER", "TROISIEME", "TERCERO", "TERZO"],
-    ["WINNER", "SIEGER", "VAINQUEUR", "VENCEDOR", "VINCITORE"],
-    ["YOU HAVE WON", "SIE HABEN GEWONNEN", "VOUS AVEZ GAGNE", "HAS GANADO", "HAI VINTO"],
-    ["YOU HAVE LOST", "SIE HABEN VERLOREN", "VOUS AVEZ PERDU", "HAS PERDIDO", "HAI PERSO"],
-    ["POSITION", "POSITION", "POSITION", "POSICION", "POSIZIONE"],
-    ["WHITE TEAM", "WEISSES TEAM", "TEAM BLANC", "EQUIPO BLANCO", "SQUADRA BIANCA"],
-    ["BLACK TEAM", "SCHWARZES TEAM", "TEAM NOIR", "EQUIPO NEGRO", "SQUADRA NERA"],
-    ["RED TEAM", "ROTES TEAM", "TEAM ROUGE", "EQUIPO ROJO", "SQUADRA ROSSA"],
-    ["YELLOW TEAM", "GELBES TEAM", "TEAM JAUNE", "EQUIPO AMARILLO", "SQUADRA GIALLA"],
-    ["BLUE TEAM", "BLAUES TEAM", "TEAM BLEU", "EQUIPO AZUL", "SQUADRA BLU"],
-    ["ORANGE TEAM", "ORANGES TEAM", "TEAM ORANGE", "EQUIPO NARANJA", "SQUADRA ARANCIONE"],
-    ["PURPLE TEAM", "LILA TEAM", "TEAM VIOLET", "EQUIPO PURPURA", "SQUADRA VIOLA"],
-    ["AQUA-GREEN TEAM", "GRÜNES TEAM", "TEAM BLEU-VERT", "EQUIPO VERDE", "SQUADRA ACQUA MARINA"],
-    ["STATISTICS", "STATISTIK", "STATISTIQUES", "ESTADISTICAS", "STATISTICHE"],
-    ["OVERALL RATING", "GESAMTWERTUNG", "CLASSEMENT GENERAL", "CLASIFICACION GENERAL", "PUNTEGGIO TOTALE"],
-    ["CHAMPIONSHIP TABLE", "MEISTERSCHAFTSLISTE", "TABLEAU DU CHAMPIONNAT", "CLASIFICACION CAMPEONATO", "CLASSIFICA CAMPIONATO"],
-    ["RACING TEAM TABLE", "TEAMLISTE", "TABLEAU DES EQUIPES", "CLASIFICACION EQUIPOS", "CLASSIFICA DI SQUADRA"],
-    ["WINNING RACE TEAM", "SIEGERTEAM", "TEAM VICTORIEUX", "EQUIPOS GANADORES", "SQUADRA VINCENTE"],
-    ["CLASSIC RACE TEAMS", "SUPERTEAMS", "TEAMS AU NIVEAU", "LOS MEJORES EQUIPOS", "LE MIGLIORI SQUADRE"],
-    ["CHAMPIONS ROSTRA", "SIEGERLISTEN", "GRANDS CHAMPIONS", "LISTA DE CAMPEONES", "ALBO D' ORO"],
-    ["DRIVERS", "FAHRER", "PILOTES", "CONDUCTORES", "PILOTI"],
-    ["DO NOT CLEAR HISCORES", "HIGHSCORES NICHT LÖSCHEN", "NE PAS EFFACER", "NO BORRAR LOS RECORDS", "NON CANCELLARE I PUNTEGGI"],
-    ["PLAYER", "SPIELER", "JOUEUR", "JUGADOR", "GIOCATORE"],
-    ["CONTINUE CHAMPIONSHIP", "MEISTERSCHAFT WEITERSPIELEN", "CONTINUER LE CHAMPIONNAT", "CONTINUAR EL CAMPEONATO", "CONTINUA CAMPIONATO"],
-    ["QUIT CHAMPIONSHIP", "MEISTERSCHAFT VERLASSEN", "QUITTER LE CHAMPIONNAT", "ABANDONAR EL CAMPEONATO", "ESCI DAL CAMPIONATO"],
-    ["IMMORTAL", "GÖTTLICH", "IMMORTEL", "INMORTAL", "IMMORTALE"],
-    ["HARDWIRED", "UNSCHLAGBAR", "GRANDE MAITRISE", "INVENCIBLE", "MASSICCIO"],
-    ["OUTTA CONTROL", "UNHALTBAR", "INCONTROLABLE", "SALVAJE", "FUORI CONTROLLO"],
-    ["DEMON", "ÜBERIRDISCH", "DEMONIAQUE", "DIABOLICO", "DEMONE"],
-    ["DEADLY", "TÖDLICH", "MORTEL", "MORTIFERO", "LETALE"],
-    ["WRECKER", "SCHRECKEN DER STRASSE", "DESTRUCTEUR", "DESTRUCTOR", "DISTRUTTORE"],
-    ["DANGEROUS", "RAMBO", "DANGEREUX", "PELIGROSO", "PERICOLOSO"],
-    ["TAILGATER", "MACHO", "COLLE-AU-CUL", "MALEVOLO", "SANGUISUGA"],
-    ["ANTISOCIAL", "KINDERFRESSER", "ANTISOCIAL", "ANTISOCIAL", "ANTISOCIALE"],
-    ["DUST DEVIL", "RENTNERJÄGER", "DIABOLIQUE", "DEMONIO DEL ASFALTO", "INDIAVOLATO"],
-    ["UPWARDLY MOBILE", "ANGEBER", "AMBITIEUX", "VALOR EN ALZA", "BORGHESE"],
-    ["MEDIOCRE", "MAGERES MITTELMASS", "MEDIOCRE", "MEDIOCRE", "MEDIOCRE"],
-    ["TOO SLOW", "LAHME SCHNECKE", "TROP LENT", "MUY LENTO", "LUMACONE"],
-    ["ENDANGERED SPECIES", "NEANDERTALER", "ESPECE EN VOIE DE DISPARITION", "ESPCIE EN PELIGRO DE EXTINCION", "SPECIE IN PERICOLO"],
-    ["TARGET PRACTICE", "ZIELSCHEIBE", "CIBLE MOBILE", "BLANCO FACIL", "BERSAGLIO FACILE"],
-    ["BACK MARKER", "SCHLUSSLICHT", "QUEUE DE PELOTON", "CARACOL", "SEMPLICIONE"],
-    ["CANYON KISSER", "BEULENHUGO", "FANA DE CHUTE LIBRE", "INUTIL AL VOLANTE", "SCARBURATO"],
-    ["VICTIM", "FREI ZUM ABSCHUSS", "VICTIME", "VICTIMA", "VITTIMA"],
-    ["SCRAP", "SCHROTT", "DECHET", "BASURA", "IMBRANATO"],
-    ["SMEAR", "MATSCHE", "TACHE", "MANCHA DE ACEITE", "SENZA SPERANZA"],
-    ["CHEATING SUCKS", "MOGELN IST DOOF, MANN!", "TRICHER NE SERT A RIEN", "ESTA MUY FEO HACER TRAMPAS", "VETO AL BARO"],
-    ["REINITIALISE JOYSTICK", "JOYSTICK NEU INITIALISIEREN", "REINITIALISER JOYSTICK", "REINICIALIZAR JOYSTICK", "REINIZIALIZZA JOYSTICK"],
-    ["DON'T CLEAR HISCORES", "HIGHSCORES NICHT LÖSCHEN", "NE PAS EFFACER", "NO BORRAR LOS RECORDS", "NON CANCELLARE I PUNTEGGI"],
-    ["FINAL LAP", "LETZTE RUNDE", "DERNIER TOUR", "ULTIMA VUELTA", "ULTIMO GIRO"],
-    ["WRONG WAY", "FALSCHE RICHTUNG", "SENS CONTRAIRE", "DIRECCION EQUIVOCADA", "STRADA SBAGLIATA"],
-    ["KILLED BY", "TOTALSCHADEN DURCH", "TUE PAR", "ANIQUILADO POR", "UCCISO DA"],
-    ["LOAD GAME", "SPIEL LADEN", "CHARGER JEU", "CARGAR JUEGO", "CARICA GIOCO"],
-    ["SAVE GAME", "SPIEL SPEICHERN", "SAUVEGARDER JEU", "SALVAR JUEGO", "SALVA GIOCO"],
-    ["EMPTY", "LEER", "LIBRE", "NADA", "VUOTO"],
-    ["WAITING FOR OTHER PLAYERS", "WARTE AUF ANDERE SPIELER", "EN ATTENTE DES AUTRES JOUEURS", "ESPERANDO A OTROS JUGADORES", "ATTENDERE ALTRI GIOCATORI"],
-    ["PRESS FIRE TO CONTINUE", "ZUM WEITERSPIELEN FEUER DRÜCKEN", "TIREZ POUR CONTINUER", "PULSA FUEGO PARA CONTINUAR", "PREMI FUOCO PER CONTINUARE"],
-    ["SHADING", "SCHATTIERUNG", "OMBRAGES", "SOMBREADO", "OMBREGGIATURA"],
-    ["SKY", "HIMMEL", "CIEL", "CIELO", "CIELO"],
-    ["TEXTURE MAPPING", "TEXTURE-MAPPING", "TEXTURES", "MAPEADO DE TEXTURAS", "MAPPATURA TEXTURE"],
-    ["NETWORK", "NETZWERK", "RESEAU", "RED", "RETE"],
-    ["STEREO", "STEREO", "STEREO", "ESTEREO", "STEREO"],
-    ["RACE TEAM", "TEAM", "TEAM DE COURSE", "EQUIPO", "SQUADRA"],
-    ["NEW CHAMPIONSHIP", "NEUE MEISTERSCHAFT", "NOUVEAU CHAMPIONNAT", "NUEVO CAMPEONATO", "NUOVO CAMPIONATO"],
-    ["LOAD CHAMPIONSHIP", "MEISTERSCHAFT LADEN", "CHARGER CHAMPIONNAT", "CARGAR CAMPEONATO", "CARICA CAMPIONATO"],
-    ["SAVE CHAMPIONSHIP", "MEISTERSCHAFT SPEICHERN", "SAUVEGARDER CHAMPIONNAT", "SALVAR CAMPEONATO", "SALVA CAMPIONATO"],
-    ["SUPER CAR", "SUPERMANN", "SUPERPUISSANCE", "TODOPODEROSO", "INVINCIBILE"],
-    ["CLEAR HISCORES", "HIGHSCORES LÖSCHEN", "EFFACER LES SCORES", "BORRAR RECORDS", "CANCELLA I PUNTEGGI"],
-    ["720!", "720!", "720!", "720!", "720!"],
-    ["360!", "360!", "360!", "360!", "360!"],
-    ["180!", "180!", "180!", "180!", "180!"],
-];
+/// Language files in config order: the original five (0 EN, 1 DE, 2 FR, 3 ES, 4 IT), then the
+/// port's additions (5 PL).
+pub const CODES: [&str; 6] = ["en", "de", "fr", "es", "it", "pl"];
+/// Number of strings in the original table.
+pub const COUNT: usize = 194;
 
-/// String n (0..193) in language lang (0 EN, 1 DE, 2 FR, 3 ES, 4 IT), UTF-8.
-pub fn get(lang: usize, n: usize) -> &'static str {
-    STRINGS.get(n).map(|r| r[lang.min(4)]).unwrap_or("")
+#[derive(Default)]
+struct Lang {
+    table: Vec<Option<String>>,
+    named: HashMap<String, String>,
 }
-/// Convert UTF-8 text to code page 437 bytes for the fonts (Ä Ö Ü Ñ etc.).
+
+static LANGS: OnceLock<Vec<Lang>> = OnceLock::new();
+
+fn parse(text: &str, file: &str) -> Result<Lang, String> {
+    let mut l = Lang { table: vec![None; COUNT], named: HashMap::new() };
+    for (no, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (k, v) = line.split_once('=').ok_or_else(|| format!("{file}:{}: expected `key = text`", no + 1))?;
+        let (k, v) = (k.trim(), v.trim().to_string());
+        if !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit()) {
+            let n: usize = k.parse().map_err(|_| format!("{file}:{}: bad key", no + 1))?;
+            *l.table.get_mut(n).ok_or_else(|| format!("{file}:{}: string {n} out of range", no + 1))? = Some(v);
+        } else {
+            l.named.insert(k.to_string(), v);
+        }
+    }
+    Ok(l)
+}
+
+/// Load every language file. English is required; a missing other language falls back to English.
+pub fn load() -> Result<(), String> {
+    let mut langs = Vec::new();
+    for code in CODES {
+        let rel = format!("lang/{code}.txt");
+        let lang = match super::files::read_raw(&rel) {
+            Ok(d) => parse(&String::from_utf8_lossy(&d), &rel)?,
+            Err(e) if code == "en" => return Err(e),
+            Err(_) => {
+                log::warn!("{rel} not found, using English");
+                Lang::default()
+            }
+        };
+        langs.push(lang);
+    }
+    let _ = LANGS.set(langs);
+    Ok(())
+}
+
+fn langs() -> &'static [Lang] {
+    LANGS.get().map(|v| v.as_slice()).unwrap_or(&[])
+}
+
+/// Number of selectable languages.
+pub fn count() -> usize {
+    CODES.len()
+}
+
+/// String n (0..193) in language lang, UTF-8; English when the language lacks it.
+pub fn get(lang: usize, n: usize) -> &'static str {
+    let l = langs();
+    let pick = |i: usize| l.get(i).and_then(|x| x.table.get(n)).and_then(|s| s.as_deref());
+    pick(lang).or_else(|| pick(0)).unwrap_or("")
+}
+
+/// A named entry (port additions) in language lang; English when the language lacks it.
+pub fn named(lang: usize, key: &str) -> &'static str {
+    let l = langs();
+    let pick = |i: usize| l.get(i).and_then(|x| x.named.get(key)).map(|s| s.as_str());
+    pick(lang).or_else(|| pick(0)).unwrap_or("")
+}
+
+/// The language's own name for the language menu.
+pub fn language_name(lang: usize) -> &'static str {
+    match langs().get(lang).and_then(|x| x.named.get("language")) {
+        Some(s) => s,
+        None => CODES.get(lang).copied().unwrap_or(""),
+    }
+}
+
+/// Convert UTF-8 text to code page 437 bytes for the fonts (Ä Ö Ü Ñ etc.). Polish letters have
+/// no glyphs in the original fonts and are drawn as their base letters for now.
 pub fn to_cp437(s: &str) -> Vec<u8> {
     s.chars()
         .map(|c| match c {
@@ -214,8 +102,63 @@ pub fn to_cp437(s: &str) -> Vec<u8> {
             'ö' => 0x94,
             'ü' => 0x81,
             'ñ' => 0xA4,
+            'Ą' => b'A',
+            'Ć' => b'C',
+            'Ę' => b'E',
+            'Ł' => b'L',
+            'Ń' => b'N',
+            'Ó' => b'O',
+            'Ś' => b'S',
+            'Ź' | 'Ż' => b'Z',
+            'ą' => b'a',
+            'ć' => b'c',
+            'ę' => b'e',
+            'ł' => b'l',
+            'ń' => b'n',
+            'ó' => b'o',
+            'ś' => b's',
+            'ź' | 'ż' => b'z',
             c if (c as u32) < 128 => c as u8,
             _ => b'?',
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every language file loads, has the whole table and every named key, and every entry fits
+    /// the 640-wide screen in the large menu font.
+    #[test]
+    fn language_files_complete() {
+        super::super::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        load().expect("load");
+        let font = super::super::sprites::Font::load("olfnt0-1", true).expect("font");
+        let en = &langs()[0];
+        let mut problems = Vec::new();
+        for (i, l) in langs().iter().enumerate() {
+            let code = CODES[i];
+            for n in 0..COUNT {
+                match &l.table[n] {
+                    None => problems.push(format!("{code}: {n:03} missing")),
+                    Some(s) => {
+                        let w = crate::gfx::canvas::Canvas::text_width(&font, &to_cp437(s), 0);
+                        if w > 640 {
+                            println!("{code} {n:03} {w}px: {s}");
+                        }
+                        if to_cp437(s).contains(&b'?') && !s.contains('?') {
+                            problems.push(format!("{code}: {n:03} has characters without glyphs: {s}"));
+                        }
+                    }
+                }
+            }
+            for k in en.named.keys() {
+                if !l.named.contains_key(k) {
+                    problems.push(format!("{code}: `{k}` missing"));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
 }

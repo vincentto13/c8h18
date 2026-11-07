@@ -2,16 +2,22 @@
 
 /// A decoded mono sample, normalised to -1..1.
 pub struct Sample {
+    #[allow(dead_code)] // used by examples/audio_test
+    pub name: String,
     pub rate: u32,
     pub data: Vec<f32>,
 }
 
 impl Sample {
+    #[allow(dead_code)] // used by examples/audio_test
+    pub fn duration(&self) -> f64 {
+        if self.rate == 0 { 0.0 } else { self.data.len() as f64 / self.rate as f64 }
+    }
 }
 
 /// Parse a WAV file. Unknown or truncated data degrades to an empty sample.
-pub fn parse(d: &[u8]) -> Sample {
-    let mut s = Sample { rate: 22050, data: Vec::new() };
+pub fn parse(name: &str, d: &[u8]) -> Sample {
+    let mut s = Sample { name: name.to_string(), rate: 22050, data: Vec::new() };
     if d.len() < 12 || &d[0..4] != b"RIFF" || &d[8..12] != b"WAVE" {
         return s;
     }

@@ -332,7 +332,7 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let mut gfx = pollster::block_on(Gfx::new(window.clone()));
-        let assets = match Assets::load() {
+        let assets = match data::strings::load().and_then(|_| Assets::load()) {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("failed to load data: {e}");
