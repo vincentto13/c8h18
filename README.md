@@ -60,8 +60,30 @@ now. `cargo test` checks that every language file is complete.
 | sliding puzzle | Ctrl + Tab |
 | cheats (after solving the puzzle) | Alt + F1..F6 |
 
+## Gamepad
+
+Port addition, replacing the original's joystick (the REINITIALISE JOYSTICK menu item is gone).
+Any controller known to `gilrs` works (Xbox, PlayStation, Switch Pro and most generic pads); it can be
+plugged in at any time, and the pad last used drives the game. Names below are Xbox (PlayStation).
+
+| Action | Pad |
+|---|---|
+| accelerate / brake | left stick or D-pad up / down, RT / LT (R2 / L2) |
+| steer | left stick or D-pad left / right |
+| minigun / missile / booster | A (✕) / B (○) / X (□) |
+| pause menu | Start (Options); Start or B resumes |
+| camera view | Y (△) cycles cockpit and the three chase views |
+| zoom out / in | LB / RB (L1 / R1) |
+| end race | hold Back / Select for 1 second |
+| menus | D-pad or stick to move, A to select, B to go back |
+
+OPTIONS → CONTROLS → ANALOG STEERING (off by default, saved in `save/pad.txt`) makes the left
+stick steer proportionally instead of fully left or right; the D-pad still steers fully. The name
+entry needs the keyboard. Rumble is not supported (the controller library has none on macOS).
+
 ## Debug automation
 
 `C8H18_AUTO="frame:op:arg;..."` runs scripted input. The ops are `shot:<png path>`,
-`key:<Key>`, `hold:<Key>`, `release:<Key>` and `quit`; `frame` counts display frames. Used for
+`key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
+Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests.

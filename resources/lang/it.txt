@@ -218,3 +218,4 @@ zoom_in = ZOOM AVANTI
 zoom_out = ZOOM INDIETRO
 reset_keys = RIPRISTINA DEFAULT
 press_key = PREMI UN TASTO
+analog_steering = STERZO ANALOGICO

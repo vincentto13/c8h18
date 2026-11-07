@@ -218,3 +218,4 @@ zoom_in = ACERCAR
 zoom_out = ALEJAR
 reset_keys = VALORES INICIALES
 press_key = PULSA UNA TECLA
+analog_steering = DIRECCION ANALOGICA

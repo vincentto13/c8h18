@@ -482,7 +482,6 @@ impl FrontEnd {
                     self.menu.set_cursor(0);
                 }
                 ActId::ChangeName => self.start_name(ctx),
-                ActId::Joystick => {}
                 ActId::Lang(l) => {
                     ctx.cfg.set_language(l);
                     self.menu.back();

@@ -11,6 +11,8 @@ pub struct HumanIn {
     pub gun: bool,
     pub missile: bool,
     pub boost: bool,
+    /// analog steering -1..1 from a gamepad stick (port addition); used when left/right are off
+    pub steer: f32,
 }
 
 const SENSOR_REBOUND: [f32; 4] = [50.0, 50.0, 200.0, 200.0];
@@ -155,6 +157,8 @@ impl World {
                         c.steer_in = 100.0;
                     } else if input.left {
                         c.steer_in = -100.0;
+                    } else if input.steer != 0.0 {
+                        c.steer_in = (input.steer * 100.0).clamp(-100.0, 100.0);
                     }
                     c.trig_gun = input.gun;
                     c.trig_missile = input.missile;

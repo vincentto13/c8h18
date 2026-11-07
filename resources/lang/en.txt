@@ -218,3 +218,4 @@ zoom_in = ZOOM IN
 zoom_out = ZOOM OUT
 reset_keys = RESET TO DEFAULTS
 press_key = PRESS A KEY
+analog_steering = ANALOG STEERING

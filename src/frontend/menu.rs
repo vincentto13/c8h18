@@ -38,7 +38,6 @@ pub enum ActId {
     Save,
     QuitChamp,
     ChangeName,
-    Joystick,
     Lang(usize),
     ResetKeys,
 }
@@ -53,6 +52,8 @@ pub enum ValId {
     MusicVol,
     FxVol,
     Bind(Action),
+    /// gamepad analog steering (port addition)
+    PadAnalog,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -128,7 +129,6 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             item(st(l, 50), Act::Action(ActId::ChangeName)),
             item(st(l, 72), Act::Open(MenuId::Detail)),
             Item { hidden: !sound, ..item(st(l, 93), Act::Open(MenuId::Sound)) },
-            item(st(l, 170), Act::Action(ActId::Joystick)),
             Item { adjustable: true, ..item(onoff(l, 84, computer_players()), Act::Value(ValId::ComputerPlayers)) },
             Item { adjustable: true, ..item(bar(l, 85, cfg.difficulty() as usize, 3), Act::Value(ValId::Difficulty)) },
             item(keys::label(l, keys::L_CONTROLS), Act::Open(MenuId::Controls)),
@@ -177,6 +177,9 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
                 .map(|&a| item(keys::bind_label(l, a, waiting_bind == Some(a)), Act::Value(ValId::Bind(a))))
                 .collect();
             v.push(item(keys::label(l, keys::L_PAUSE_ZOOM), Act::Open(MenuId::PauseZoom)));
+            let mut analog = crate::data::strings::to_cp437(crate::data::strings::named(l, "analog_steering"));
+            analog.extend_from_slice(if crate::pad::analog_steering() { b" d" } else { b" c" });
+            v.push(Item { adjustable: true, ..item(analog, Act::Value(ValId::PadAnalog)) });
             v.push(item(keys::label(l, keys::L_RESET), Act::Action(ActId::ResetKeys)));
             v.push(item(st(l, 56), Act::Back));
             v
@@ -204,6 +207,7 @@ fn value(v: ValId, d: Dir, ctx: &mut Ctx) {
         ValId::ComputerPlayers => {
             COMPUTER_PLAYERS.store(!computer_players(), Ordering::Relaxed);
         }
+        ValId::PadAnalog => crate::pad::set_analog_steering(!crate::pad::analog_steering()),
         ValId::Difficulty => {
             let x = cfg.difficulty() as i32;
             match d {

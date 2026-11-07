@@ -218,3 +218,4 @@ zoom_in = ZOOM NAH
 zoom_out = ZOOM FERN
 reset_keys = STANDARD WIEDERHERSTELLEN
 press_key = TASTE DRÜCKEN
+analog_steering = ANALOGE LENKUNG

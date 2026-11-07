@@ -22,6 +22,7 @@ use crate::gfx::{Gfx, Scene};
 use crate::input::KeyCode;
 use camera::{RaceCamera, ViewData};
 use flight::HumanIn;
+use crate::pad::Btn;
 use hud::Hud;
 use math::*;
 use sim::*;
@@ -154,14 +155,20 @@ impl Race {
     fn human_input(&self, ctx: &Ctx) -> HumanIn {
         let b = &self.bindings;
         let d = |ks: &[KeyCode]| ks.iter().any(|&k| ctx.input.down(k));
+        let p = ctx.pad;
+        // gamepad (port addition): stick / D-pad drive like the arrow keys; with analog steering the
+        // stick steers proportionally and only the D-pad steers fully
+        let analog = crate::pad::analog_steering();
+        let (pad_left, pad_right) = if analog { (p.dpad[2], p.dpad[3]) } else { (p.down(Btn::Left), p.down(Btn::Right)) };
         HumanIn {
-            accel: d(&b.accelerate),
-            brake: d(&b.brake),
-            left: d(&b.left),
-            right: d(&b.right),
-            gun: d(&b.fire),
-            missile: d(&b.missile),
-            boost: d(&b.booster),
+            accel: d(&b.accelerate) || p.down(Btn::Up) || p.down(Btn::Rt),
+            brake: d(&b.brake) || p.down(Btn::Down) || p.down(Btn::Lt),
+            left: d(&b.left) || pad_left,
+            right: d(&b.right) || pad_right,
+            gun: d(&b.fire) || p.down(Btn::A),
+            missile: d(&b.missile) || p.down(Btn::B),
+            boost: d(&b.booster) || p.down(Btn::X),
+            steer: if analog { p.steer } else { 0.0 },
         }
     }
 
@@ -182,6 +189,7 @@ impl Race {
         }
         // pause menu
         if let Some(pm) = &mut self.paused {
+            ctx.keys.extend(ctx.pad.menu_keys(true));
             self.fe_acc += dt;
             while self.fe_acc >= 1.0 / 70.0 {
                 self.fe_acc -= 1.0 / 70.0;
@@ -271,6 +279,38 @@ impl Race {
                     }
                 }
                 _ => {}
+            }
+        }
+        // gamepad (port addition): Start pauses, Y cycles the views, LB / RB zoom, Back held 1 s ends
+        // the race; in a demo race any button ends it
+        let pad = ctx.pad;
+        if self.setup.demo {
+            if pad.any_pressed() {
+                return Some(self.results());
+            }
+        } else {
+            if pad.pressed(Btn::Start) {
+                ctx.audio.stop_all();
+                self.paused = Some(PauseMenu::new());
+                self.fe_acc = 0.0;
+                return None;
+            }
+            if pad.pressed(Btn::Y) {
+                self.view_action = match self.view_action {
+                    7 => 8,
+                    8 => 9,
+                    9 => 10,
+                    _ => 7,
+                };
+            }
+            if pad.pressed(Btn::Lb) {
+                self.cam.zoom = (self.cam.zoom + 20.0).min(1000.0);
+            }
+            if pad.pressed(Btn::Rb) {
+                self.cam.zoom = (self.cam.zoom - 20.0).max(0.0);
+            }
+            if pad.back_held >= 1.0 {
+                self.end_now = true;
             }
         }
         if self.end_now {

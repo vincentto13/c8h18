@@ -6,6 +6,7 @@ mod frontend;
 mod gfx;
 mod input;
 mod intro;
+mod pad;
 mod race;
 
 use assets::Assets;
@@ -119,6 +120,7 @@ struct Game {
     audio: Audio,
     cfg: Config,
     input: Input,
+    pad: pad::Pad,
     bg: Canvas,
     fg: Canvas,
     mode: Mode,
@@ -138,7 +140,7 @@ struct App {
 impl Game {
     fn ctx_parts(&mut self) -> Ctx<'_> {
         let keys = self.input.take();
-        Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound }
+        Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound }
     }
 
     fn start_fade(&mut self, to: f32, steps: u32, after: After) {
@@ -163,6 +165,17 @@ impl Game {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f64().min(0.25);
         self.last = now;
+        self.pad.poll(dt);
+        // menus and the "any key" screens see pad presses as keys; the race reads the pad itself
+        match self.mode {
+            Mode::Intro(_) | Mode::Title(_) => {
+                if self.pad.state.any_pressed() {
+                    self.input.pressed.push(input::KeyPress { code: KeyCode::Enter, shift: false, right_shift: false, ctrl: false, alt: false, ch: None });
+                }
+            }
+            Mode::Front(_) => self.input.pressed.extend(self.pad.state.menu_keys(false)),
+            _ => {}
+        }
         let (cw, ch) = self.gfx.canvas_dims();
         self.bg.resize(cw, ch);
         self.fg.resize(cw, ch);
@@ -223,7 +236,7 @@ impl Game {
                     self.acc -= step;
                     let Mode::Front(fe) = &mut self.mode else { break };
                     let keys = self.input.take();
-                    let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound };
+                    let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound };
                     match fe.frame(&mut ctx) {
                         FeOut::Continue => {}
                         FeOut::Race(setup) => {
@@ -244,7 +257,7 @@ impl Game {
                 if *n >= 2 {
                     let setup = setup.clone();
                     let keys = self.input.take();
-                    let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound };
+                    let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound };
                     match Race::new(setup, &mut ctx, &mut self.gfx) {
                         Ok(r) => next = Some(Mode::Race(r)),
                         Err(e) => {
@@ -257,7 +270,7 @@ impl Game {
             }
             Mode::Race(race) => {
                 let keys = self.input.take();
-                let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound };
+                let mut ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound };
                 if let Some(res) = race.frame(&mut ctx, dt) {
                     self.audio.stop_all();
                     self.audio.stop_music();
@@ -296,7 +309,7 @@ impl Game {
             }
             Mode::Front(fe) => {
                 let keys = Vec::new();
-                let ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound };
+                let ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound };
                 scene = fe.draw(&ctx, &mut self.bg, &mut self.fg);
                 use_bg = true;
             }
@@ -312,7 +325,7 @@ impl Game {
             }
             Mode::Race(race) => {
                 let keys = Vec::new();
-                let ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, keys, sound: self.sound };
+                let ctx = Ctx { assets: &self.assets, audio: &mut self.audio, cfg: &mut self.cfg, input: &self.input, pad: &self.pad.state, keys, sound: self.sound };
                 scene = race.draw_gfx(&ctx, &mut self.gfx, &mut self.fg);
             }
             Mode::Quit => return,
@@ -332,6 +345,7 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let mut gfx = pollster::block_on(Gfx::new(window.clone()));
+        pad::load_settings();
         let assets = match data::strings::load().and_then(|_| Assets::load()) {
             Ok(a) => a,
             Err(e) => {
@@ -372,6 +386,7 @@ impl ApplicationHandler for App {
             audio,
             cfg,
             input: Input::default(),
+            pad: pad::Pad::new(),
             bg,
             fg,
             mode,
@@ -436,6 +451,8 @@ impl ApplicationHandler for App {
                         }
                         "hold" => { if let Some(code) = key_from_name(arg) { game.input.held.insert(code); } }
                         "release" => { if let Some(code) = key_from_name(arg) { game.input.held.remove(&code); } }
+                        "padhold" => { if let Some(b) = pad::btn_from_name(arg) { game.pad.fake[b as usize] = true; } }
+                        "padrelease" => { if let Some(b) = pad::btn_from_name(arg) { game.pad.fake[b as usize] = false; } }
                         "quit" => { el.exit(); return; }
                         _ => {}
                     }

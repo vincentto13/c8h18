@@ -218,3 +218,4 @@ zoom_in = PRZYBLIŻ
 zoom_out = ODDAL
 reset_keys = PRZYWRÓĆ DOMYŚLNE
 press_key = NACIŚNIJ KLAWISZ
+analog_steering = STEROWANIE ANALOGOWE
