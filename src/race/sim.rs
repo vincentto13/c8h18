@@ -137,7 +137,6 @@ pub struct Craft {
     pub hold: i32,
     pub place: u8,
     pub started: bool,
-    pub race_over: bool,
     pub autopilot_locked: bool,
     pub lap_event: bool,
     pub kill_event: bool,
@@ -229,7 +228,6 @@ pub struct Thing {
     pub disp: [f32; 3],
     pub yaw: f32,
     pub pitch: f32,
-    pub roll: f32,
     pub speed: f32,
     pub rise: f32,
     pub life: i32,
@@ -256,7 +254,6 @@ impl Thing {
             disp: [0.0; 3],
             yaw: 0.0,
             pitch: 0.0,
-            roll: 0.0,
             speed: 0.0,
             rise: 0.0,
             life: 0,
@@ -336,9 +333,6 @@ pub struct World {
     pub demo: bool,
     pub sounds: Vec<SoundEv>,
     pub viewed: usize,
-    pub finish_counter: u8,
-    /// pending group activations
-    pub activate: Vec<u16>,
     /// banner requests (craft, message id)
     pub banner_reqs: Vec<(usize, u16)>,
 }
@@ -375,8 +369,6 @@ impl World {
             demo: false,
             sounds: Vec::new(),
             viewed: 0,
-            finish_counter: 0,
-            activate: Vec::new(),
             banner_reqs: Vec::new(),
         };
         w.activate_group(1);

@@ -92,7 +92,7 @@ impl Track {
         checkpoints.sort_by_key(|c| c.value);
         // waypoints
         let mut wps = vec![Waypoint::default()];
-        let mut find_or_add = |wps: &mut Vec<Waypoint>, x: f32, y: f32, kind: u8| -> usize {
+        let find_or_add = |wps: &mut Vec<Waypoint>, x: f32, y: f32, kind: u8| -> usize {
             if let Some(i) = wps.iter().skip(1).position(|w| w.x == x && w.y == y) {
                 return i + 1;
             }
@@ -204,16 +204,6 @@ impl Track {
         }
         best.unwrap_or(0)
     }
-    pub fn prev_checkpoint(&self, idx: usize) -> usize {
-        let v = self.checkpoints[idx].value;
-        let mut best: Option<usize> = None;
-        for (i, c) in self.checkpoints.iter().enumerate() {
-            if c.value < v && best.map(|b| c.value > self.checkpoints[b].value).unwrap_or(true) {
-                best = Some(i);
-            }
-        }
-        best.unwrap_or_else(|| self.checkpoints.len().saturating_sub(1))
-    }
 
     pub fn absolute_nearest(&self, x: f32, y: f32) -> usize {
         let mut best = (f32::MAX, 0);
@@ -230,7 +220,7 @@ impl Track {
     }
     pub fn nearest(&self, x: f32, y: f32) -> usize {
         let mut best = (f32::MAX, 0);
-        for (i, a) in self.wps.iter().enumerate().skip(1) {
+        for (_i, a) in self.wps.iter().enumerate().skip(1) {
             if a.child == 0 {
                 continue;
             }
@@ -267,9 +257,5 @@ impl Track {
             return p;
         }
         p
-    }
-    /// Index of the checkpoint containing a waypoint position, if any
-    pub fn checkpoint_at(&self, x: f32, y: f32) -> Option<usize> {
-        self.checkpoints.iter().position(|c| c.contains(x, y))
     }
 }

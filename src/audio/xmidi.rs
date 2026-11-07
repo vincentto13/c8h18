@@ -32,10 +32,6 @@ pub struct Sequence {
 }
 
 impl Sequence {
-    /// Total length in intervals (ignoring loops).
-    pub fn length(&self) -> u64 {
-        self.events.iter().map(|e| e.delta as u64).sum()
-    }
 }
 
 fn be32(d: &[u8], o: usize) -> usize {

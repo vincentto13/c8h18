@@ -31,7 +31,6 @@ pub struct Messages {
     pub big_state: u8,
     pub big_count: i32,
     pub big_id: u8,
-    pub sample_on: bool,
 }
 
 pub struct Hud {
@@ -47,7 +46,7 @@ impl Hud {
         Hud {
             cracks: [Crack::default(); 16],
             seed: Lcg(1),
-            msg: Messages { banner_state: 0, banner_count: 0, sweep: 0, banner_id: 0, priority: 0, big_state: 0, big_count: 0, big_id: 0, sample_on: false },
+            msg: Messages { banner_state: 0, banner_count: 0, sweep: 0, banner_id: 0, priority: 0, big_state: 0, big_count: 0, big_id: 0 },
         }
     }
 

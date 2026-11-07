@@ -101,13 +101,6 @@ impl Canvas {
             }
         }
     }
-    /// Sprite blit at absolute canvas coordinates (no x0 offset).
-    pub fn sprite_abs(&mut self, s: &Sprite, x: i32, y: i32, mode: Blit) {
-        let x0 = self.x0;
-        self.x0 = 0;
-        self.sprite(s, x, y, mode);
-        self.x0 = x0;
-    }
     /// Sprite blit that is skipped whole when it would leave the 640 virtual screen.
     pub fn sprite_clipped(&mut self, s: &Sprite, x: i32, y: i32, mode: Blit) {
         if x < 0 || y < 0 || x + s.w as i32 > 640 || y + s.h as i32 > self.h {
@@ -132,20 +125,6 @@ impl Canvas {
     /// Width of a string drawn with `spacing` extra advance per glyph.
     pub fn text_width(font: &Font, s: &[u8], spacing: i32) -> i32 {
         s.iter().map(|&c| font.glyph(c).w as i32 + spacing).sum()
-    }
-    /// Simple text: colour fonts draw their own colours; mask fonts use colour/outline.
-    pub fn text(&mut self, font: &Font, s: &[u8], x: i32, y: i32, spacing: i32, colour: u8, outline: Option<u8>) -> i32 {
-        let mut cx = x;
-        for &c in s {
-            let g = font.glyph(c);
-            if font.mask_glyphs {
-                self.mask_sprite(g, cx, y, colour, outline, Blit::Solid);
-            } else {
-                self.sprite(g, cx, y, Blit::Solid);
-            }
-            cx += g.w as i32 + spacing;
-        }
-        cx
     }
     /// Centred text (x = (640 - width) / 2), glyphs crossing the screen edge skipped.
     pub fn text_centred(&mut self, font: &Font, s: &[u8], y: i32, spacing: i32, colour: u8, outline: Option<u8>) {

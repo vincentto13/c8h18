@@ -362,6 +362,10 @@ impl World {
                     } else {
                         c.booster_active = false;
                         c.boost_charge = 0;
+                        // The weapon side only clears its restriction while draining a non-zero
+                        // charge, so clearing the charge here must clear the restriction too, or
+                        // the booster stays locked for the rest of the race.
+                        c.boost_restriction = 0;
                     }
                 }
                 let fwd = along2(c.yaw, 1.0);

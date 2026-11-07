@@ -59,7 +59,6 @@ pub struct Race {
     stereo: bool,
     /// camera window action chosen by keys (port: camera keys work in every race)
     view_action: u8,
-    pub mesh_uploaded: bool,
     lit: usize,
     frame_dt: f64,
     cheat: bool,
@@ -144,7 +143,6 @@ impl Race {
             lang: ctx.cfg.language(),
             stereo: ctx.cfg.stereo(),
             view_action: if (7..=10).contains(&view_action) { view_action } else { 7 },
-            mesh_uploaded: true,
             lit: 0,
             frame_dt: 0.0,
             cheat: ctx.cfg.cheat(),
@@ -375,6 +373,13 @@ impl Race {
 
     /// One simulation tick in the order of spec 05 §3 / port notes.
     fn tick(&mut self, input: HumanIn) {
+        // Cockpit shake decays (count × 5 >> 3) while the cockpit view runs; done per tick so the
+        // decay rate does not depend on the display frame rate.
+        if self.view_action == 7 {
+            let f = self.cam.follow.min(self.w.crafts.len() - 1);
+            let c = &mut self.w.crafts[f];
+            c.shake = c.shake * 5 >> 3;
+        }
         let w = &mut self.w;
         w.frame += 1;
         w.sounds.clear();
@@ -681,9 +686,6 @@ impl Race {
         Some(scene)
     }
 
-    pub fn draw(&mut self, _ctx: &Ctx, _fg: &mut Canvas) -> Option<Scene> {
-        None
-    }
 }
 
 /// Debug: run a race without graphics and print the crafts' progress.
@@ -700,7 +702,7 @@ pub fn headless(track: usize, ticks: u32, rings: Vec<Vec<(i32, i32)>>, demo: boo
         c.slot = slot;
         c.human = false;
         c.name = types::AI_NAMES[slot].into();
-        c.difficulty = 2;
+        c.difficulty = std::env::var("C8H18_DIFF").ok().and_then(|v| v.parse().ok()).unwrap_or(2);
         c.personality = PERSONALITY[slot];
         let (cx, cy) = cells.get(slot).copied().unwrap_or((128, 80));
         c.pos = [cx as f32 + 0.5, cy as f32 + 0.5, 0.0];
@@ -737,8 +739,8 @@ pub fn headless(track: usize, ticks: u32, rings: Vec<Vec<(i32, i32)>>, demo: boo
             println!("--- tick {t} things {}", w.things.iter().filter(|t| t.alive).count());
             for c in &w.crafts {
                 println!(
-                    "{:8} pos ({:6.2},{:6.2},{:5.2}) yaw {:5.0} act {:2} wp {:3} lap {} cp {} place {} fin {} thr {:3.0} v {:.3} sh {} fu {} am {} kills {}",
-                    c.name, c.pos[0], c.pos[1], c.pos[2], c.yaw, c.action, c.waypoint, c.lap, c.target_cp, c.place, c.finish_place, c.throttle, c.measured_vel, c.shield, c.fuel, c.ammo, c.kills
+                    "{:8} pos ({:6.2},{:6.2},{:5.2}) yaw {:5.0} act {:2} wp {:3} lap {} cp {} place {} fin {} thr {:3.0} v {:.3} sh {} fu {} am {} kills {} shots {}/{}",
+                    c.name, c.pos[0], c.pos[1], c.pos[2], c.yaw, c.action, c.waypoint, c.lap, c.target_cp, c.place, c.finish_place, c.throttle, c.measured_vel, c.shield, c.fuel, c.ammo, c.kills, c.bullets_hit, c.bullets_fired
                 );
             }
         }

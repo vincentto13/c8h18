@@ -24,7 +24,9 @@ pub struct RaceSetup {
 #[derive(Clone, Debug, Default)]
 pub struct PlayerResult {
     pub name: String,
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub team: u8,
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub craft: u8,
     pub human: bool,
     /// 0 = not classified

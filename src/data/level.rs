@@ -13,7 +13,6 @@ pub struct Cell {
     /// >=0 texture id, <0 = -column index
     pub tex: i16,
     pub orient: u8,
-    pub raw: [u8; 12],
 }
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -84,9 +83,7 @@ impl Level {
         let mut cells = Vec::with_capacity(MAP_W * MAP_H);
         for i in 0..MAP_W * MAP_H {
             let o = CELLS + i * 12;
-            let mut raw = [0u8; 12];
-            raw.copy_from_slice(&d[o..o + 12]);
-            cells.push(Cell { light: i16le(d, o), height: u16le(d, o + 2), tex: i16le(d, o + 4), orient: d[o + 10] >> 4, raw });
+            cells.push(Cell { light: i16le(d, o), height: u16le(d, o + 2), tex: i16le(d, o + 4), orient: d[o + 10] >> 4 });
         }
         let mut columns = vec![Column::default(); 1024];
         for id in 1..1024 {

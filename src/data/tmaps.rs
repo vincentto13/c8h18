@@ -4,6 +4,7 @@ use super::rnc::maybe_unpack;
 
 #[derive(Clone, Default)]
 pub struct TmapImage {
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub mode: u8,
     pub w: u32,
     pub h: u32,

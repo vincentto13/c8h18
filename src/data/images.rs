@@ -21,15 +21,6 @@ impl Palette {
         }
         Palette { vga }
     }
-    pub fn rgba8(&self) -> Vec<[u8; 4]> {
-        self.vga
-            .iter()
-            .map(|c| {
-                let f = |v: u8| (v << 2) | (v >> 4);
-                [f(c[0]), f(c[1]), f(c[2]), 255]
-            })
-            .collect()
-    }
     /// Colour cube (spec 08 §13).
     pub fn colour_cube(&self) -> Vec<u8> {
         let mut cube = vec![0u8; 512];
@@ -62,7 +53,9 @@ impl Palette {
 /// A raw indexed image.
 #[derive(Clone, Default)]
 pub struct Image {
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub w: u32,
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub h: u32,
     pub pix: Vec<u8>,
 }
@@ -86,10 +79,6 @@ impl ColourTable {
         let mut data = load(&format!("data/table0-{n}.dat"))?;
         data.resize(83968, 0);
         Ok(ColourTable { data })
-    }
-    #[inline]
-    pub fn light(&self, row: usize, c: u8) -> u8 {
-        self.data[(row.min(63)) * 256 + c as usize]
     }
     #[inline]
     pub fn blend(&self, a: u8, b: u8) -> u8 {
@@ -116,6 +105,7 @@ pub fn load_sky(n: usize) -> Result<Vec<u8>, String> {
 
 /// Model texture atlas TEX0-0 (spec 01 §7).
 pub struct TexAtlas {
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub w: u32,
     pub h: u32,
     pub pix: Vec<u8>,

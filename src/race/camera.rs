@@ -4,7 +4,6 @@ use super::sim::*;
 use crate::gfx::Camera;
 
 pub struct RaceCamera {
-    pub action: u8,
     pub follow: usize,
     pub zoom: f32,
     pub x: f32,
@@ -35,7 +34,6 @@ pub struct ViewData {
 impl RaceCamera {
     pub fn new() -> RaceCamera {
         RaceCamera {
-            action: 7,
             follow: 0,
             zoom: 300.0,
             x: 0.0,

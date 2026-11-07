@@ -10,9 +10,7 @@ pub struct Assets {
     /// font slots 0..4: HFONT0-0, MFONT0-0, OLFNT0-1, OSFNT0-1, PFONT0-1
     pub fonts: Vec<Font>,
     pub panel: SpriteSheet,
-    pub hspr: SpriteSheet,
     pub logo: SpriteSheet,
-    pub point: SpriteSheet,
     pub track: SpriteSheet,
     pub oscr: Image,
     pub onet: Image,
@@ -41,9 +39,7 @@ impl Assets {
         Ok(Assets {
             fonts,
             panel: SpriteSheet::load("panel0-1")?,
-            hspr: SpriteSheet::load("hspr0-0")?,
             logo: SpriteSheet::load("logo0-1")?,
-            point: SpriteSheet::load("point0-0")?,
             track: SpriteSheet::load("track0-1")?,
             oscr: Image::load_raw("data/oscr0-1.dat", 640, 480)?,
             onet: Image::load_raw("data/onet0-1.dat", 640, 480)?,

@@ -17,6 +17,7 @@ pub const MUSIC_SLOTS: usize = 4;
 
 /// One catalogue item: its 8.3 name and its bytes.
 pub struct Item {
+    #[allow(dead_code)] // kept to describe the data; not needed by the game yet
     pub name: String,
     pub data: Vec<u8>,
 }

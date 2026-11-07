@@ -71,9 +71,6 @@ impl SpriteSheet {
         static EMPTY: Sprite = Sprite { w: 0, h: 0, pix: Vec::new(), mask: Vec::new() };
         self.sprites.get(i).unwrap_or(&EMPTY)
     }
-    pub fn len(&self) -> usize {
-        self.sprites.len()
-    }
 }
 
 /// A font: character c is entry c+1.

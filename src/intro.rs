@@ -375,11 +375,6 @@ impl Intro {
         self.flc.frame_count.min(FRAMES).min(self.flc.chunks())
     }
 
-    /// Current frame number (1-based; 0 before the first `advance`).
-    pub fn frame(&self) -> usize {
-        self.frame
-    }
-
     fn run_script(&mut self, frame: usize, audio: &mut Audio) {
         for &(f, op, arg) in SCRIPT.iter() {
             if f as usize != frame {

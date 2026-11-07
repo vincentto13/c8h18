@@ -84,11 +84,9 @@ impl Config {
     }
 
     // ---- raw access ----
-    pub fn u8(&self, o: usize) -> u8 { self.raw[o] }
     pub fn u16(&self, o: usize) -> u16 { u16le(&self.raw, o) }
     pub fn i16(&self, o: usize) -> i16 { i16le(&self.raw, o) }
     pub fn i32(&self, o: usize) -> i32 { i32le(&self.raw, o) }
-    pub fn set_u8(&mut self, o: usize, v: u8) { self.raw[o] = v; }
     pub fn set_u16(&mut self, o: usize, v: u16) { self.raw[o..o + 2].copy_from_slice(&v.to_le_bytes()); }
     pub fn set_i16(&mut self, o: usize, v: i16) { self.raw[o..o + 2].copy_from_slice(&v.to_le_bytes()); }
     pub fn set_i32(&mut self, o: usize, v: i32) { self.raw[o..o + 4].copy_from_slice(&v.to_le_bytes()); }
@@ -96,19 +94,15 @@ impl Config {
     pub fn set_str_at(&mut self, o: usize, len: usize, s: &str) { put_str(&mut self.raw, o, len, s); }
 
     // ---- named fields ----
-    pub fn slot_title(&self) -> String { self.str_at(0, 32) }
     pub fn set_slot_title(&mut self, s: &str) { self.set_str_at(0, 32, s) }
     pub fn cheat(&self) -> bool { self.raw[0x22] & 4 != 0 }
     pub fn set_cheat(&mut self, on: bool) { if on { self.raw[0x22] |= 4 } else { self.raw[0x22] &= !4 } }
-    pub fn debug_overlay(&self) -> bool { self.u16(0x36) & 2 != 0 }
     pub fn toggle_debug_overlay(&mut self) { let v = self.u16(0x36) ^ 2; self.set_u16(0x36, v) }
     pub fn view_slot(&self) -> u16 { self.u16(0x0949).min(3) }
-    pub fn set_view_slot(&mut self, v: u16) { self.set_u16(0x0949, v) }
     pub fn team(&self) -> u8 { self.raw[0x094b] & 7 }
     pub fn set_team(&mut self, v: u8) { self.raw[0x094b] = v & 7 }
     pub fn craft(&self) -> u8 { self.raw[0x094c] % 6 }
     pub fn set_craft(&mut self, v: u8) { self.raw[0x094c] = v % 6 }
-    pub fn session(&self) -> u8 { self.raw[0x094d] }
     pub fn name(&self) -> String { self.str_at(0x094f, 9) }
     pub fn set_name(&mut self, s: &str) { self.set_str_at(0x094f, 9, s) }
     pub fn difficulty(&self) -> u8 { self.raw[0x0977].min(3) }
@@ -122,7 +116,6 @@ impl Config {
     pub fn set_shading(&mut self, v: bool) { self.set_i32(0x2996, v as i32) }
     pub fn sky(&self) -> bool { self.i32(0x299a) != 0 }
     pub fn set_sky(&mut self, v: bool) { self.set_i32(0x299a, v as i32) }
-    pub fn near_distance(&self) -> i32 { self.i32(0x299e) }
     pub fn set_near_distance(&mut self, v: i32) { self.set_i32(0x299e, v) }
     pub fn texture_level(&self) -> i32 { self.i32(0x29a2).clamp(0, 4) }
     pub fn set_texture_level(&mut self, v: i32) { self.set_i32(0x29a2, v.clamp(0, 4)) }

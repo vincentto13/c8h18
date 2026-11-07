@@ -63,9 +63,6 @@ impl Camera {
         let up = [up0[0] * cr + right0[0] * sr, up0[1] * cr + right0[1] * sr, up0[2] * cr + right0[2] * sr];
         (right, up, fwd)
     }
-    pub fn eye(&self) -> [f32; 3] {
-        [self.x, self.height, self.row]
-    }
     /// View-space coordinates (vx right, vy up, vz depth) of a world point (x, height, row).
     pub fn to_view(&self, p: [f32; 3]) -> [f32; 3] {
         let (r, u, f) = self.basis();

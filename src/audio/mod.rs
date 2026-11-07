@@ -43,27 +43,12 @@ impl Audio {
         Audio::with(false, Arc::new(Mutex::new(Shared::new(44100))), None)
     }
 
-    /// An enabled audio system without an output device; pull samples with [`Audio::render`].
-    pub fn new_offline(rate: u32) -> Audio {
-        Audio::with(true, Arc::new(Mutex::new(Shared::new(rate))), None)
-    }
-
     fn with(enabled: bool, shared: Arc<Mutex<Shared>>, stream: Option<cpal::Stream>) -> Audio {
         Audio { enabled, shared, _stream: stream, sound_dat: None, timbres: None, tunes: None }
     }
 
-    /// Mix the next `out.len() / 2` stereo frames (interleaved L R) — offline use only.
-    pub fn render(&mut self, out: &mut [f32]) {
-        self.lock().mix(out);
-    }
-
     fn lock(&self) -> MutexGuard<'_, Shared> {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    /// Whether sound output is working.
-    pub fn enabled(&self) -> bool {
-        self.enabled
     }
 
     /// Load SOUND.DAT bank (0 = game, 1 = intro) from the 8-bit 22 kHz slot; replaces the current bank.
@@ -96,7 +81,7 @@ impl Audio {
             .into_iter()
             .map(|it| {
                 let d = crate::data::rnc::maybe_unpack(it.data).unwrap_or_default();
-                Arc::new(wav::parse(&it.name, &d))
+                Arc::new(wav::parse(&d))
             })
             .collect())
     }
@@ -165,16 +150,6 @@ impl Audio {
         }
     }
 
-    pub fn set_rate(&mut self, owner: u32, sample: u16, rate: i32) {
-        if !self.enabled || rate <= 0 {
-            return;
-        }
-        let mut sh = self.lock();
-        if let Some(i) = sh.find(owner, sample) {
-            sh.voices[i].rate = rate;
-        }
-    }
-
     pub fn stop(&mut self, owner: u32, sample: u16) {
         if !self.enabled {
             return;
@@ -194,10 +169,6 @@ impl Audio {
         for v in self.lock().voices.iter_mut() {
             v.active = false;
         }
-    }
-
-    pub fn is_playing(&self, owner: u32, sample: u16) -> bool {
-        self.enabled && self.lock().find(owner, sample).is_some()
     }
 
     /// Configured volumes 0..0x8000.

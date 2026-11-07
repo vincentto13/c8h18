@@ -61,7 +61,7 @@ impl Model {
         }
         p += nvert * 6;
         let shade = d.get(p..p + nvert).map(|s| s.to_vec()).unwrap_or_else(|| vec![64; nvert]);
-        tris.retain(|t| (t.v.iter().all(|&v| (v as usize) < nvert)));
+        tris.retain(|t| t.v.iter().all(|&v| (v as usize) < nvert));
         Ok(Model { tris, verts, shade, flags })
     }
 }

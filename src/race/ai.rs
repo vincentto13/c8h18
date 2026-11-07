@@ -149,7 +149,7 @@ impl World {
             }
         }
         // 11 weapons
-        if c.lap > 0 && c.target.is_some() && c.difficulty > 0 {
+        if c.lap > 0 && c.target.is_some() {
             if c.personality & P_STEADY != 0 || (c.time_slice as u32 % 150) < 80 {
                 c.heat = 0;
                 c.upgrades[0] = c.difficulty as i32;
