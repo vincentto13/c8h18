@@ -9,7 +9,7 @@ struct Globals {
     fog: vec4<f32>,      // fog_start, fog_end, cull_radius, textured(1/0)
     sky: vec4<f32>,      // yaw (raw/65536 turns), pitch raw, roll raw, enabled
     screen: vec4<f32>,   // width, height, canvas_w, canvas_h
-    misc: vec4<f32>,     // fade 0..1, bg_enabled, 0, 0
+    misc: vec4<f32>,     // fade 0..1, bg_enabled, fog models (1/0), smoothing (1/0)
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -19,6 +19,8 @@ struct Globals {
 @group(0) @binding(4) var atlas_tex: texture_2d<u32>;      // model atlas r8uint
 @group(0) @binding(5) var tmap_tex: texture_2d<u32>;       // billboards rg8uint (idx, opaque)
 @group(0) @binding(6) var sky_tex: texture_2d<u32>;        // 256x256 r8uint
+@group(0) @binding(7) var lin_samp: sampler;               // linear, repeat
+@group(0) @binding(8) var sky_rgb: texture_2d<f32>;        // the sky in colour (SMOOTHING)
 
 fn pal(i: u32) -> vec4<f32> {
     return textureLoad(palette_tex, vec2<i32>(i32(i), 0), 0);
@@ -93,6 +95,10 @@ fn shade(i: VOut) -> vec4<f32> {
     } else if (fogm == 2u) {
         if (i.depth >= fe) { row = 0.0; }
         else if (i.depth > fs) { row = min(row, floor((fe - i.depth) * 32.0 / (fe - fs))); }
+    } else if (g.misc.z > 0.5) {
+        // port: with a longer view distance models fade into the haze like the terrain
+        if (i.depth > fe) { row = 0.0; }
+        else if (i.depth > fs) { row = mix(row, 0.5, (i.depth - fs) / (fe - fs)); }
     }
     let lc = light(i32(floor(row)), c);
     let col = pal(lc);
@@ -143,6 +149,10 @@ fn fs_sky(i: FOut) -> @location(0) vec4<f32> {
     let dy = px.y - hy;
     let u = g.sky.x * 256.0 * 2.0 + (c * dx - s * dy) * scale;
     let v = (s * dx + c * dy) * scale;
+    if (g.misc.w > 0.5) {
+        // SMOOTHING: bilinear filtering of the sky in colour (texel i spans [i, i+1) like below)
+        return vec4<f32>(textureSampleLevel(sky_rgb, lin_samp, vec2<f32>(u, v) / 256.0, 0.0).rgb, 1.0);
+    }
     let tu = i32(floor(u)) & 255;
     let tv = i32(floor(v)) & 255;
     let t = textureLoad(sky_tex, vec2<i32>(tu, tv), 0).r;
@@ -153,26 +163,43 @@ fn fs_sky(i: FOut) -> @location(0) vec4<f32> {
 @group(1) @binding(1) var bg_tex: texture_2d<u32>;
 @group(1) @binding(2) var fg_tex: texture_2d<u32>;
 
-fn canvas_px(t: texture_2d<u32>, uv: vec2<f32>) -> u32 {
-    let p = vec2<i32>(floor(uv * vec2<f32>(g.screen.z, g.screen.w)));
-    return textureLoad(t, clamp(p, vec2<i32>(0), vec2<i32>(i32(g.screen.z) - 1, i32(g.screen.w) - 1)), 0).r;
+// A canvas pixel as premultiplied colour: opaque a = 1, translucent a = 0.5, transparent a = 0.
+fn canvas_pm(t: texture_2d<u32>, p: vec2<i32>) -> vec4<f32> {
+    let q = clamp(p, vec2<i32>(0), vec2<i32>(i32(g.screen.z) - 1, i32(g.screen.w) - 1));
+    let v = textureLoad(t, q, 0).r;
+    if ((v & 0x100u) != 0u) { return vec4<f32>(pal(v & 0xffu).rgb, 1.0); }
+    if ((v & 0x200u) != 0u) { return vec4<f32>(pal(v & 0xffu).rgb * 0.5, 0.5); }
+    return vec4<f32>(0.0);
+}
+
+// SMOOTHING: sharp-bilinear scaling of the canvas. Pixels stay crisp; only the one screen pixel
+// where two canvas pixels meet is blended, so uneven nearest-neighbour widths disappear.
+fn canvas_sharp(t: texture_2d<u32>, uv: vec2<f32>) -> vec4<f32> {
+    let p = uv * vec2<f32>(g.screen.z, g.screen.w) - 0.5;
+    let i0 = vec2<i32>(floor(p));
+    let scale = max(g.screen.y / g.screen.w, 1.0);
+    let f = clamp((fract(p) - 0.5) * scale + 0.5, vec2<f32>(0.0), vec2<f32>(1.0));
+    let a = mix(canvas_pm(t, i0), canvas_pm(t, i0 + vec2<i32>(1, 0)), f.x);
+    let b = mix(canvas_pm(t, i0 + vec2<i32>(0, 1)), canvas_pm(t, i0 + vec2<i32>(1, 1)), f.x);
+    return mix(a, b, f.y);
+}
+
+fn canvas_layer(t: texture_2d<u32>, uv: vec2<f32>) -> vec4<f32> {
+    if (g.misc.w > 0.5) { return canvas_sharp(t, uv); }
+    return canvas_pm(t, vec2<i32>(floor(uv * vec2<f32>(g.screen.z, g.screen.w))));
 }
 
 @fragment
 fn fs_composite(i: FOut) -> @location(0) vec4<f32> {
     var col = vec3<f32>(0.0);
     if (g.misc.y > 0.5) {
-        let b = canvas_px(bg_tex, i.uv);
-        if ((b & 0x100u) != 0u) { col = pal(b & 0xffu).rgb; }
+        let b = canvas_layer(bg_tex, i.uv);
+        col = col * (1.0 - b.a) + b.rgb;
     }
     let sp = vec2<i32>(floor(i.uv * vec2<f32>(textureDimensions(scene_tex))));
     let s = textureLoad(scene_tex, sp, 0);
     col = mix(col, s.rgb, s.a);
-    let f = canvas_px(fg_tex, i.uv);
-    if ((f & 0x100u) != 0u) {
-        col = pal(f & 0xffu).rgb;
-    } else if ((f & 0x200u) != 0u) {
-        col = mix(col, pal(f & 0xffu).rgb, 0.5);
-    }
+    let f = canvas_layer(fg_tex, i.uv);
+    col = col * (1.0 - f.a) + f.rgb;
     return vec4<f32>(col * g.misc.x, 1.0);
 }

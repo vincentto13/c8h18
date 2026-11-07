@@ -7,6 +7,7 @@ mod gfx;
 mod input;
 mod intro;
 mod pad;
+mod video;
 mod race;
 
 use assets::Assets;
@@ -346,6 +347,7 @@ impl ApplicationHandler for App {
         let window = Arc::new(el.create_window(attrs).expect("window"));
         let mut gfx = pollster::block_on(Gfx::new(window.clone()));
         pad::load_settings();
+        video::load();
         let assets = match data::strings::load().and_then(|_| Assets::load()) {
             Ok(a) => a,
             Err(e) => {

@@ -81,7 +81,8 @@ impl<'a> SceneBuilder<'a> {
     fn in_range(&self, p: [f32; 3]) -> bool {
         let dx = p[0] - self.cam.x;
         let dy = p[1] - self.cam.row;
-        dx * dx + dy * dy < 17.5 * 17.5
+        let r = crate::video::get().draw_radius();
+        dx * dx + dy * dy < r * r
     }
 
     /// World point (x, row, height) -> GPU world (x, height, row).
@@ -162,7 +163,8 @@ impl<'a> SceneBuilder<'a> {
         for b in &self.bills {
             sprites.extend_from_slice(&b.verts);
         }
-        Scene { camera: self.cam, sky, world: true, opaque: self.opaque, sprites, near: 200.0 / 2048.0, far: 40.0 }
+        let far = crate::video::get().draw_radius() + 4.0;
+        Scene { camera: self.cam, sky, world: true, opaque: self.opaque, sprites, near: 200.0 / 2048.0, far }
     }
 }
 

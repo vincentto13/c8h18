@@ -203,6 +203,11 @@ language = ENGLISH
 # options menu (port addition)
 language_menu = LANGUAGE
 
+# detail options (port addition)
+view_distance = VIEW DISTANCE
+antialiasing = ANTI-ALIASING
+smoothing = SMOOTHING
+
 # controls menu (port addition)
 controls = CONTROLS
 accelerate = ACCELERATE

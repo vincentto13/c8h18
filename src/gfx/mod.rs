@@ -7,8 +7,15 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
-pub const FOG_START: f32 = 12.0;
-pub const FOG_END: f32 = 16.0;
+/// Samples per pixel of the 3D view with ANTI-ALIASING on.
+const MSAA: u32 = 4;
+
+/// The 3D pipelines for one sample count.
+struct ScenePipes {
+    sky: wgpu::RenderPipeline,
+    world: wgpu::RenderPipeline,
+    sprite: wgpu::RenderPipeline,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable, Debug, Default)]
@@ -118,14 +125,20 @@ pub struct Gfx {
     atlas_tex: wgpu::Texture,
     tmap_tex: wgpu::Texture,
     sky_tex: wgpu::Texture,
+    /// the sky in colour for filtered sampling (SMOOTHING)
+    sky_rgb_tex: wgpu::Texture,
+    linear_sampler: wgpu::Sampler,
+    sky_idx: Vec<u8>,
+    pal_rgba: Vec<u8>,
     scene_tex: wgpu::Texture,
     depth_tex: wgpu::Texture,
+    /// multisampled colour and depth targets (ANTI-ALIASING), created on first use
+    msaa: Option<(wgpu::Texture, wgpu::Texture)>,
     bg_tex: wgpu::Texture,
     fg_tex: wgpu::Texture,
     canvas_size: (u32, u32),
-    sky_pipe: wgpu::RenderPipeline,
-    world_pipe: wgpu::RenderPipeline,
-    sprite_pipe: wgpu::RenderPipeline,
+    pipes: ScenePipes,
+    pipes_msaa: ScenePipes,
     comp_pipe: wgpu::RenderPipeline,
     terrain_buf: Option<(wgpu::Buffer, u32)>,
     dyn_buf: wgpu::Buffer,
@@ -206,6 +219,13 @@ impl Gfx {
                 tex_entry(4, ST::Uint, VD::D2),
                 tex_entry(5, ST::Uint, VD::D2),
                 tex_entry(6, ST::Uint, VD::D2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                tex_entry(8, ST::Float { filterable: true }, VD::D2),
             ],
         });
         let bind1_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -227,7 +247,8 @@ impl Gfx {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32, 3 => Uint32, 4 => Uint32],
         };
-        let full_pipe = |fs: &str, fmt: wgpu::TextureFormat, layout: &wgpu::PipelineLayout, depth: bool| {
+        let ms = |samples: u32| wgpu::MultisampleState { count: samples, ..Default::default() };
+        let full_pipe = |fs: &str, fmt: wgpu::TextureFormat, layout: &wgpu::PipelineLayout, depth: bool, samples: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(fs),
                 layout: Some(layout),
@@ -244,7 +265,7 @@ impl Gfx {
                 } else {
                     None
                 },
-                multisample: Default::default(),
+                multisample: ms(samples),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some(fs),
@@ -255,9 +276,8 @@ impl Gfx {
                 cache: None,
             })
         };
-        let sky_pipe = full_pipe("fs_sky", SCENE_FMT, &layout0, true);
-        let comp_pipe = full_pipe("fs_composite", config.format, &layout01, false);
-        let world = |blend: bool| {
+        let comp_pipe = full_pipe("fs_composite", config.format, &layout01, false, 1);
+        let world = |blend: bool, samples: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("world"),
                 layout: Some(&layout0),
@@ -270,7 +290,7 @@ impl Gfx {
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
-                multisample: Default::default(),
+                multisample: ms(samples),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some("fs_world"),
@@ -292,8 +312,8 @@ impl Gfx {
                 cache: None,
             })
         };
-        let world_pipe = world(false);
-        let sprite_pipe = world(true);
+        let pipes = ScenePipes { sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, 1), world: world(false, 1), sprite: world(true, 1) };
+        let pipes_msaa = ScenePipes { sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, MSAA), world: world(false, MSAA), sprite: world(true, MSAA) };
 
         use wgpu::TextureFormat as TF;
         use wgpu::TextureUsages as TU;
@@ -304,6 +324,14 @@ impl Gfx {
         let atlas_tex = tex2d(&device, 256, 768, 1, TF::R8Uint, sampled);
         let tmap_tex = tex2d(&device, 1024, 1024, 1, TF::Rg8Uint, sampled);
         let sky_tex = tex2d(&device, 256, 256, 1, TF::R8Uint, sampled);
+        let sky_rgb_tex = tex2d(&device, 256, 256, 1, TF::Rgba8Unorm, sampled);
+        let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let (w, h) = (config.width, config.height);
         let scene_tex = tex2d(&device, w, h, 1, SCENE_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         let depth_tex = tex2d(&device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT);
@@ -338,14 +366,18 @@ impl Gfx {
             atlas_tex,
             tmap_tex,
             sky_tex,
+            sky_rgb_tex,
+            linear_sampler,
+            sky_idx: vec![0; 65536],
+            pal_rgba: vec![0; 1024],
             scene_tex,
             depth_tex,
+            msaa: None,
             bg_tex,
             fg_tex,
             canvas_size: (640, 480),
-            sky_pipe,
-            world_pipe,
-            sprite_pipe,
+            pipes,
+            pipes_msaa,
             comp_pipe,
             terrain_buf: None,
             dyn_buf,
@@ -374,6 +406,8 @@ impl Gfx {
                 wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(&v(&self.atlas_tex)) },
                 wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(&v(&self.tmap_tex)) },
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&v(&self.sky_tex)) },
+                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&self.linear_sampler) },
+                wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&v(&self.sky_rgb_tex)) },
             ],
         }));
     }
@@ -409,6 +443,38 @@ impl Gfx {
         use wgpu::TextureUsages as TU;
         self.scene_tex = tex2d(&self.device, w, h, 1, SCENE_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         self.depth_tex = tex2d(&self.device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT);
+        self.msaa = None;
+    }
+
+    /// Multisampled colour and depth targets of the window size.
+    fn msaa_views(&mut self) -> (wgpu::TextureView, wgpu::TextureView) {
+        if self.msaa.is_none() {
+            let (w, h) = self.size();
+            let mk = |fmt| {
+                self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("msaa"),
+                    size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: MSAA,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: fmt,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+            };
+            self.msaa = Some((mk(SCENE_FMT), mk(DEPTH_FMT)));
+        }
+        let (c, d) = self.msaa.as_ref().unwrap();
+        (c.create_view(&Default::default()), d.create_view(&Default::default()))
+    }
+
+    /// The sky in colour (palette applied) for filtered sampling.
+    fn update_sky_rgb(&self) {
+        let mut d = Vec::with_capacity(65536 * 4);
+        for &i in &self.sky_idx {
+            d.extend_from_slice(&self.pal_rgba[i as usize * 4..i as usize * 4 + 4]);
+        }
+        self.write_tex(&self.sky_rgb_tex, &d, 256, 256, 0, 4);
     }
 
     /// Palette as 6-bit VGA values.
@@ -421,6 +487,8 @@ impl Gfx {
             d.push(255);
         }
         self.write_tex(&self.palette_tex, &d, 256, 1, 0, 4);
+        self.pal_rgba = d;
+        self.update_sky_rgb();
     }
     pub fn set_colour_table(&mut self, data: &[u8]) {
         self.write_tex(&self.light_tex, &data[..83968], 256, 328, 0, 1);
@@ -433,6 +501,8 @@ impl Gfx {
     }
     pub fn set_sky(&mut self, data: &[u8]) {
         self.write_tex(&self.sky_tex, &data[..65536], 256, 256, 0, 1);
+        self.sky_idx = data[..65536].to_vec();
+        self.update_sky_rgb();
     }
     pub fn set_model_atlas(&mut self, pix: &[u8], h: u32) {
         let h = h.min(768);
@@ -506,9 +576,10 @@ impl Gfx {
     pub fn render(&mut self, scene: Option<&Scene>, bg: Option<&canvas::Canvas>, fg: &canvas::Canvas, fade: f32) {
         self.upload_canvas(bg, fg);
         let (w, h) = self.size();
+        let video = crate::video::get();
         let mut glob = Globals::default();
         glob.screen = [w as f32, h as f32, fg.w as f32, fg.h as f32];
-        glob.misc = [fade.clamp(0.0, 1.0), bg.is_some() as u32 as f32, 0.0, 0.0];
+        glob.misc = [fade.clamp(0.0, 1.0), bg.is_some() as u32 as f32, video.fog_models() as u32 as f32, video.smoothing as u32 as f32];
         if let Some(s) = scene {
             let (r, u, f) = s.camera.basis();
             let focal = if s.camera.fixed_43 { s.camera.focal320 * (h as f32 * 4.0 / 3.0) / 320.0 } else { self.focal_px(s.camera.focal320) };
@@ -519,7 +590,7 @@ impl Gfx {
             let near = if s.near > 0.0 { s.near } else { 200.0 / 2048.0 };
             let far = if s.far > 0.0 { s.far } else { 40.0 };
             glob.proj = [focal / (w as f32 * 0.5), focal / (h as f32 * 0.5), near, far];
-            glob.fog = [FOG_START, FOG_END, FOG_END + 1.5, 1.0];
+            glob.fog = [video.fog_start(), video.fog_end(), video.draw_radius(), 1.0];
             glob.sky = [s.camera.yaw / 65536.0, s.camera.pitch, s.camera.roll, s.sky as u32 as f32];
         }
         self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&glob));
@@ -557,16 +628,24 @@ impl Gfx {
         };
         let out_view = frame.texture.create_view(&Default::default());
         let scene_view = self.scene_tex.create_view(&Default::default());
-        let depth_view = self.depth_tex.create_view(&Default::default());
+        // with ANTI-ALIASING the scene is drawn multisampled and resolved into the scene texture
+        let aa = video.antialias && scene.is_some();
+        let (color_view, depth_view, resolve) = if aa {
+            let (c, d) = self.msaa_views();
+            (c, d, Some(&scene_view))
+        } else {
+            (self.scene_tex.create_view(&Default::default()), self.depth_tex.create_view(&Default::default()), None)
+        };
+        let pipes = if aa { &self.pipes_msaa } else { &self.pipes };
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &scene_view,
+                    view: &color_view,
                     depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                    resolve_target: resolve,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: if aa { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store } },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth_view,
@@ -581,21 +660,21 @@ impl Gfx {
                 let b0 = self.bind0.as_ref().unwrap();
                 pass.set_bind_group(0, b0, &[]);
                 if s.world {
-                    pass.set_pipeline(&self.sky_pipe);
+                    pass.set_pipeline(&pipes.sky);
                     pass.draw(0..3, 0..1);
                     if let Some((buf, n)) = &self.terrain_buf {
-                        pass.set_pipeline(&self.world_pipe);
+                        pass.set_pipeline(&pipes.world);
                         pass.set_vertex_buffer(0, buf.slice(..));
                         pass.draw(0..*n, 0..1);
                     }
                 }
                 if n_op > 0 {
-                    pass.set_pipeline(&self.world_pipe);
+                    pass.set_pipeline(&pipes.world);
                     pass.set_vertex_buffer(0, self.dyn_buf.slice(..));
                     pass.draw(0..n_op, 0..1);
                 }
                 if n_sp > 0 {
-                    pass.set_pipeline(&self.sprite_pipe);
+                    pass.set_pipeline(&pipes.sprite);
                     pass.set_vertex_buffer(0, self.dyn_buf.slice(..));
                     pass.draw(n_op..n_op + n_sp, 0..1);
                 }

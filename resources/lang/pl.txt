@@ -203,6 +203,11 @@ language = POLSKI
 # options menu (port addition)
 language_menu = JĘZYK
 
+# detail options (port addition)
+view_distance = ZASIĘG WIDZENIA
+antialiasing = WYGŁADZANIE KRAWĘDZI
+smoothing = WYGŁADZANIE
+
 # controls menu (port addition)
 controls = STEROWANIE
 accelerate = GAZ

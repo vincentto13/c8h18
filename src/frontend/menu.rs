@@ -54,6 +54,10 @@ pub enum ValId {
     Bind(Action),
     /// gamepad analog steering (port addition)
     PadAnalog,
+    /// display settings (port additions)
+    ViewDistance,
+    Antialias,
+    Smoothing,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -84,6 +88,23 @@ fn onoff(lang: usize, n: usize, on: bool) -> Vec<u8> {
     v
 }
 
+/// A port addition's on/off item (label from the language files' named entries).
+fn named_onoff(lang: usize, key: &str, on: bool) -> Vec<u8> {
+    let mut v = crate::data::strings::to_cp437(crate::data::strings::named(lang, key));
+    v.extend_from_slice(if on { b" d" } else { b" c" });
+    v
+}
+
+/// A port addition's bar item.
+fn named_bar(lang: usize, key: &str, filled: usize, total: usize) -> Vec<u8> {
+    let mut v = crate::data::strings::to_cp437(crate::data::strings::named(lang, key));
+    v.push(b' ');
+    for i in 0..total {
+        v.push(if i < filled { b'_' } else { b'a' });
+    }
+    v
+}
+
 fn bar(lang: usize, n: usize, filled: usize, total: usize) -> Vec<u8> {
     let mut v = st(lang, n);
     v.push(b' ');
@@ -107,6 +128,7 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
     let cfg = &*ctx.cfg;
     let l = cfg.language();
     let sound = ctx.sound;
+    let video = crate::video::get();
     match menu {
         MenuId::Main => vec![
             item(st(l, 35), Act::Open(MenuId::Race)),
@@ -145,6 +167,10 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
                     Act::Value(ValId::Texture),
                 )
             },
+            // port additions
+            Item { adjustable: true, ..item(named_bar(l, "view_distance", video.view + 1, crate::video::VIEW_DISTANCES.len()), Act::Value(ValId::ViewDistance)) },
+            Item { adjustable: true, ..item(named_onoff(l, "antialiasing", video.antialias), Act::Value(ValId::Antialias)) },
+            Item { adjustable: true, ..item(named_onoff(l, "smoothing", video.smoothing), Act::Value(ValId::Smoothing)) },
             item(st(l, 56), Act::Back),
         ],
         MenuId::Sound => vec![
@@ -218,6 +244,16 @@ fn value(v: ValId, d: Dir, ctx: &mut Ctx) {
         }
         ValId::Shading => cfg.set_shading(!cfg.shading()),
         ValId::Sky => cfg.set_sky(!cfg.sky()),
+        ValId::ViewDistance => crate::video::update(|v| {
+            let n = crate::video::VIEW_DISTANCES.len();
+            v.view = match d {
+                Dir::Left => v.view.saturating_sub(1),
+                Dir::Right => (v.view + 1).min(n - 1),
+                _ => (v.view + 1) % n,
+            };
+        }),
+        ValId::Antialias => crate::video::update(|v| v.antialias = !v.antialias),
+        ValId::Smoothing => crate::video::update(|v| v.smoothing = !v.smoothing),
         ValId::Texture => {
             match d {
                 Dir::Left => {

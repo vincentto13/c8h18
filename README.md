@@ -31,6 +31,19 @@ Options:
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
 
+## Display options
+
+Port additions in OPTIONS → DETAIL OPTIONS (also in the pause menu), saved in `save/video.txt`;
+none of them changes the game itself:
+
+| Option | Effect | Default |
+|---|---|---|
+| VIEW DISTANCE | how far the world is drawn: 16 cells (the original), 32 or 48; the haze keeps the original proportions, and beyond the original distance crafts and objects fade into it like the terrain | 48 |
+| ANTI-ALIASING | 4× multisampling of the 3D view | on |
+| SMOOTHING | filtered sky, sharp-bilinear scaling of the 640×480 menus and HUD (even pixel sizes at any window size) | on |
+
+With VIEW DISTANCE at the first step and the other two off the picture matches the original.
+
 ## Languages
 
 The UI text is loaded at start-up from `lang/<code>.txt` in the data directory: `en`, `de`, `fr`,
