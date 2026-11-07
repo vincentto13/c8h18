@@ -66,19 +66,26 @@ Port addition, replacing the original's joystick (the REINITIALISE JOYSTICK menu
 Any controller known to `gilrs` works (Xbox, PlayStation, Switch Pro and most generic pads); it can be
 plugged in at any time, and the pad last used drives the game. Names below are Xbox (PlayStation).
 
-| Action | Pad |
+| Action | Pad (default) |
 |---|---|
 | accelerate / brake | left stick or D-pad up / down, RT / LT (R2 / L2) |
 | steer | left stick or D-pad left / right |
 | minigun / missile / booster | A (✕) / B (○) / X (□) |
 | pause menu | Start (Options); Start or B resumes |
-| camera view | Y (△) cycles cockpit and the three chase views |
+| camera view | Y (△) cycles cockpit and the three chase views (unless Y is bound to an action) |
 | zoom out / in | LB / RB (L1 / R1) |
 | end race | hold Back / Select for 1 second |
 | menus | D-pad or stick to move, A to select, B to go back |
 
-OPTIONS → CONTROLS → ANALOG STEERING (off by default, saved in `save/pad.txt`) makes the left
-stick steer proportionally instead of fully left or right; the D-pad still steers fully. The name
+**Remapping**: in OPTIONS → CONTROLS each action shows its keys and, in brackets, its pad button
+(e.g. `MINIGUN: Z , V [A]`). Select an action and press either a key or a pad button: each action
+has one pad button, and a button taken by another action moves over. Back cancels. RESET TO
+DEFAULTS restores keys and pad buttons. Fixed on the pad: the stick and D-pad directions, Back (end
+race) and the menu buttons (A select, B back, Start).
+
+OPTIONS → CONTROLS → ANALOG STEERING (off by default) makes the left stick steer proportionally
+instead of fully left or right; the D-pad still steers fully. Pad settings are saved in
+`save/pad.txt` (`analog_steering = on|off` and `<action> = <button>` lines). The name
 entry needs the keyboard. Rumble is not supported (the controller library has none on macOS).
 
 ## Debug automation

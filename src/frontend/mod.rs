@@ -125,6 +125,11 @@ fn is_enter(k: &KeyPress) -> bool {
 }
 
 impl FrontEnd {
+    /// Waiting for a key or pad button to bind (pad presses must then reach the menu raw).
+    pub fn binding(&self) -> bool {
+        self.menu.waiting.is_some()
+    }
+
     pub fn new(entry: FeEntry, ctx: &mut Ctx) -> FrontEnd {
         let mut fe = FrontEnd {
             st: St::Menu,
@@ -486,7 +491,10 @@ impl FrontEnd {
                     ctx.cfg.set_language(l);
                     self.menu.back();
                 }
-                ActId::ResetKeys => keys::reset(),
+                ActId::ResetKeys => {
+                    keys::reset();
+                    crate::pad::reset_buttons();
+                }
             },
             _ => {}
         }

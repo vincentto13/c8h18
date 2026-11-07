@@ -5,7 +5,8 @@
 //! handle ([`PadState::menu_keys`]).
 use crate::input::{KeyCode, KeyPress};
 use gilrs::{Axis, Button, EventType, GamepadId, Gilrs};
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::frontend::keys::{Action, ACTIONS};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Btn {
@@ -38,34 +39,130 @@ const TRIGGER_ON: f32 = 0.3;
 const REPEAT_DELAY: f64 = 0.4;
 const REPEAT_EVERY: f64 = 0.1;
 
-/// Analog steering with the left stick (CONTROLS menu, saved in `pad.txt`).
-static ANALOG: AtomicBool = AtomicBool::new(false);
+/// Pad settings (port addition), saved in `pad.txt` in the save directory: analog steering and one
+/// button per bindable action (OPTIONS → CONTROLS). The stick / D-pad directions, Back (end race)
+/// and the menu buttons are fixed.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Settings {
+    analog: bool,
+    /// indexed by `Action as usize` (the order of `keys::ACTIONS`)
+    buttons: [Option<Btn>; 10],
+}
+
+const DEFAULT: Settings = Settings {
+    analog: false,
+    buttons: [
+        Some(Btn::Rt),    // accelerate
+        Some(Btn::Lt),    // brake
+        None,             // left (stick / D-pad)
+        None,             // right (stick / D-pad)
+        Some(Btn::A),     // minigun
+        Some(Btn::B),     // missile
+        Some(Btn::X),     // booster
+        Some(Btn::Start), // pause
+        Some(Btn::Rb),    // zoom in
+        Some(Btn::Lb),    // zoom out
+    ],
+};
+
+static SETTINGS: Mutex<Settings> = Mutex::new(DEFAULT);
+
+fn settings() -> Settings {
+    *SETTINGS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn update(f: impl FnOnce(&mut Settings)) {
+    let mut s = SETTINGS.lock().unwrap_or_else(|e| e.into_inner());
+    f(&mut s);
+    save(&s);
+}
+
+fn path() -> std::path::PathBuf {
+    crate::data::files::save_dir().join("pad.txt")
+}
+
+fn save(s: &Settings) {
+    if *s == DEFAULT {
+        let _ = std::fs::remove_file(path());
+        return;
+    }
+    let mut t = format!("analog_steering = {}\n", if s.analog { "on" } else { "off" });
+    for (a, n) in ACTIONS {
+        t.push_str(&format!("{n} = {}\n", s.buttons[a as usize].map(btn_name).unwrap_or("")));
+    }
+    let _ = std::fs::create_dir_all(crate::data::files::save_dir());
+    if let Err(e) = std::fs::write(path(), t) {
+        log::warn!("cannot write {}: {e}", path().display());
+    }
+}
+
+fn parse(t: &str) -> Settings {
+    let mut s = DEFAULT;
+    for line in t.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        let (k, v) = (k.trim(), v.trim());
+        if k == "analog_steering" {
+            s.analog = v == "on";
+        } else if let Some(&(a, _)) = ACTIONS.iter().find(|(_, n)| *n == k) {
+            s.buttons[a as usize] = btn_from_name(v).filter(|&b| bindable(b));
+        }
+    }
+    // a button drives one action only
+    for i in 0..s.buttons.len() {
+        if s.buttons[i].is_some() && s.buttons[..i].contains(&s.buttons[i]) {
+            s.buttons[i] = None;
+        }
+    }
+    s
+}
+
+/// Read `pad.txt` from the save directory (defaults when missing).
+pub fn load_settings() {
+    let s = std::fs::read_to_string(path()).map(|t| parse(&t)).unwrap_or(DEFAULT);
+    *SETTINGS.lock().unwrap_or_else(|e| e.into_inner()) = s;
+}
 
 pub fn analog_steering() -> bool {
-    ANALOG.load(Ordering::Relaxed)
+    settings().analog
 }
 
 pub fn set_analog_steering(on: bool) {
-    ANALOG.store(on, Ordering::Relaxed);
-    let path = crate::data::files::save_dir().join("pad.txt");
-    let _ = std::fs::create_dir_all(crate::data::files::save_dir());
-    if let Err(e) = std::fs::write(&path, format!("analog_steering = {}\n", if on { "on" } else { "off" })) {
-        log::warn!("cannot write {}: {e}", path.display());
-    }
+    update(|s| s.analog = on);
 }
 
-/// Read `pad.txt` from the save directory.
-pub fn load_settings() {
-    let path = crate::data::files::save_dir().join("pad.txt");
-    if let Ok(t) = std::fs::read_to_string(path) {
-        for line in t.lines() {
-            if let Some((k, v)) = line.split_once('=') {
-                if k.trim() == "analog_steering" {
-                    ANALOG.store(v.trim() == "on", Ordering::Relaxed);
-                }
+/// Buttons that can be bound: everything but the directions and Back.
+pub fn bindable(b: Btn) -> bool {
+    !matches!(b, Btn::Up | Btn::Down | Btn::Left | Btn::Right | Btn::Back)
+}
+
+/// The pad button of an action, if any.
+pub fn button(a: Action) -> Option<Btn> {
+    settings().buttons[a as usize]
+}
+
+/// Whether some action uses the button.
+pub fn is_bound(b: Btn) -> bool {
+    settings().buttons.contains(&Some(b))
+}
+
+/// Make `b` the pad button of `a` (taken away from any other action).
+pub fn bind(a: Action, b: Btn) {
+    if !bindable(b) {
+        return;
+    }
+    update(|s| {
+        for x in s.buttons.iter_mut() {
+            if *x == Some(b) {
+                *x = None;
             }
         }
-    }
+        s.buttons[a as usize] = Some(b);
+    });
+}
+
+/// Default pad buttons (keeps the analog steering setting).
+pub fn reset_buttons() {
+    update(|s| s.buttons = DEFAULT.buttons);
 }
 
 /// The pad as seen by the game this frame.
@@ -83,6 +180,8 @@ pub struct PadState {
     pub back_held: f64,
     /// D-pad up, down, left, right on their own (steering with analog steering on)
     pub dpad: [bool; 4],
+    /// counts polls, so a press can be told apart from one seen in an earlier frame
+    pub serial: u64,
 }
 
 impl PadState {
@@ -91,6 +190,18 @@ impl PadState {
     }
     pub fn pressed(&self, b: Btn) -> bool {
         self.pressed.contains(&b)
+    }
+    /// Buttons that went down this frame.
+    pub fn pressed_buttons(&self) -> &[Btn] {
+        &self.pressed
+    }
+    /// The action's pad button is held.
+    pub fn action_down(&self, a: Action) -> bool {
+        button(a).is_some_and(|b| self.down(b))
+    }
+    /// The action's pad button went down this frame.
+    pub fn action_pressed(&self, a: Action) -> bool {
+        button(a).is_some_and(|b| self.pressed(b))
     }
     pub fn any_pressed(&self) -> bool {
         !self.pressed.is_empty()
@@ -223,17 +334,40 @@ impl Pad {
         s.held = held;
         s.steer = steer;
         s.dpad = s_dpad;
+        s.serial += 1;
         s.connected = connected;
     }
 }
 
-/// Button name for the test automation.
+/// Button name as shown in the CONTROLS menu and written to `pad.txt`.
+pub fn btn_name(b: Btn) -> &'static str {
+    match b {
+        Btn::Up => "UP",
+        Btn::Down => "DOWN",
+        Btn::Left => "LEFT",
+        Btn::Right => "RIGHT",
+        Btn::A => "A",
+        Btn::B => "B",
+        Btn::X => "X",
+        Btn::Y => "Y",
+        Btn::Lb => "LB",
+        Btn::Rb => "RB",
+        Btn::Lt => "LT",
+        Btn::Rt => "RT",
+        Btn::Start => "START",
+        Btn::Back => "BACK",
+    }
+}
+
+/// Button from its name (`pad.txt`, test automation); case-insensitive.
 pub fn btn_from_name(n: &str) -> Option<Btn> {
+    let n = n.to_ascii_uppercase();
+    let n = n.as_str();
     Some(match n {
-        "Up" => Btn::Up,
-        "Down" => Btn::Down,
-        "Left" => Btn::Left,
-        "Right" => Btn::Right,
+        "UP" => Btn::Up,
+        "DOWN" => Btn::Down,
+        "LEFT" => Btn::Left,
+        "RIGHT" => Btn::Right,
         "A" => Btn::A,
         "B" => Btn::B,
         "X" => Btn::X,
@@ -242,8 +376,8 @@ pub fn btn_from_name(n: &str) -> Option<Btn> {
         "RB" => Btn::Rb,
         "LT" => Btn::Lt,
         "RT" => Btn::Rt,
-        "Start" => Btn::Start,
-        "Back" => Btn::Back,
+        "START" => Btn::Start,
+        "BACK" => Btn::Back,
         _ => return None,
     })
 }
@@ -295,6 +429,18 @@ mod tests {
         }
         // first press, then after 0.4 s one every 0.1 s: 1 + 6 or 7
         assert!((7..=8).contains(&fires), "{fires}");
+    }
+
+    #[test]
+    fn settings_file() {
+        let s = parse("analog_steering = on\nfire = y\nmissile = Y\nbooster = BACK\npause =\n");
+        assert!(s.analog);
+        assert_eq!(s.buttons[Action::Fire as usize], Some(Btn::Y));
+        assert_eq!(s.buttons[Action::Missile as usize], None, "a button drives one action only");
+        assert_eq!(s.buttons[Action::Booster as usize], None, "Back cannot be bound");
+        assert_eq!(s.buttons[Action::Pause as usize], None);
+        assert_eq!(s.buttons[Action::Accelerate as usize], Some(Btn::Rt), "missing lines keep defaults");
+        assert_eq!(parse(""), DEFAULT);
     }
 
     #[test]

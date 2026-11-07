@@ -173,7 +173,7 @@ impl Game {
                     self.input.pressed.push(input::KeyPress { code: KeyCode::Enter, shift: false, right_shift: false, ctrl: false, alt: false, ch: None });
                 }
             }
-            Mode::Front(_) => self.input.pressed.extend(self.pad.state.menu_keys(false)),
+            Mode::Front(ref fe) if !fe.binding() => self.input.pressed.extend(self.pad.state.menu_keys(false)),
             _ => {}
         }
         let (cw, ch) = self.gfx.canvas_dims();

@@ -17,7 +17,7 @@ pub enum Action {
     ZoomOut,
 }
 
-const ACTIONS: [(Action, &str); 10] = [
+pub const ACTIONS: [(Action, &str); 10] = [
     (Action::Accelerate, "accelerate"),
     (Action::Brake, "brake"),
     (Action::Left, "left"),
@@ -250,6 +250,37 @@ pub fn bind_label(lang: usize, a: Action, waiting: bool) -> Vec<u8> {
     } else {
         let names: Vec<&str> = with(|b| b.get(a).iter().map(|&k| key_label(k)).collect());
         v.extend_from_slice(names.join(" ").as_bytes());
+        if let Some(p) = crate::pad::button(a) {
+            v.extend_from_slice(b" [");
+            v.extend_from_slice(crate::pad::btn_name(p).as_bytes());
+            v.push(b']');
+        }
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The CONTROLS items with the default keys and pad buttons fit the 640-wide screen in every
+    /// language (menu font OLFNT0-1).
+    #[test]
+    fn control_labels_fit() {
+        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        crate::data::strings::load().expect("strings");
+        let font = crate::data::sprites::Font::load("olfnt0-1", true).expect("font");
+        CUR.with(|c| *c.borrow_mut() = Some(Bindings::default()));
+        let mut wide = Vec::new();
+        for lang in 0..crate::data::strings::count() {
+            for (a, _) in ACTIONS {
+                let s = bind_label(lang, a, false);
+                let w = crate::gfx::canvas::Canvas::text_width(&font, &s, 0);
+                if w > 640 {
+                    wide.push(format!("{lang}: {} ({w}px)", String::from_utf8_lossy(&s)));
+                }
+            }
+        }
+        assert!(wide.is_empty(), "{}", wide.join("\n"));
+    }
 }

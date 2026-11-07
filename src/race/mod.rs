@@ -22,6 +22,7 @@ use crate::gfx::{Gfx, Scene};
 use crate::input::KeyCode;
 use camera::{RaceCamera, ViewData};
 use flight::HumanIn;
+use crate::frontend::keys::Action;
 use crate::pad::Btn;
 use hud::Hud;
 use math::*;
@@ -161,13 +162,13 @@ impl Race {
         let analog = crate::pad::analog_steering();
         let (pad_left, pad_right) = if analog { (p.dpad[2], p.dpad[3]) } else { (p.down(Btn::Left), p.down(Btn::Right)) };
         HumanIn {
-            accel: d(&b.accelerate) || p.down(Btn::Up) || p.down(Btn::Rt),
-            brake: d(&b.brake) || p.down(Btn::Down) || p.down(Btn::Lt),
-            left: d(&b.left) || pad_left,
-            right: d(&b.right) || pad_right,
-            gun: d(&b.fire) || p.down(Btn::A),
-            missile: d(&b.missile) || p.down(Btn::B),
-            boost: d(&b.booster) || p.down(Btn::X),
+            accel: d(&b.accelerate) || p.down(Btn::Up) || p.action_down(Action::Accelerate),
+            brake: d(&b.brake) || p.down(Btn::Down) || p.action_down(Action::Brake),
+            left: d(&b.left) || pad_left || p.action_down(Action::Left),
+            right: d(&b.right) || pad_right || p.action_down(Action::Right),
+            gun: d(&b.fire) || p.action_down(Action::Fire),
+            missile: d(&b.missile) || p.action_down(Action::Missile),
+            boost: d(&b.booster) || p.action_down(Action::Booster),
             steer: if analog { p.steer } else { 0.0 },
         }
     }
@@ -281,21 +282,22 @@ impl Race {
                 _ => {}
             }
         }
-        // gamepad (port addition): Start pauses, Y cycles the views, LB / RB zoom, Back held 1 s ends
-        // the race; in a demo race any button ends it
+        // gamepad (port addition): the bound buttons pause and zoom (defaults Start, RB / LB), Y cycles
+        // the views unless bound to an action, Back held 1 s ends the race; in a demo race any button
+        // ends it
         let pad = ctx.pad;
         if self.setup.demo {
             if pad.any_pressed() {
                 return Some(self.results());
             }
         } else {
-            if pad.pressed(Btn::Start) {
+            if pad.action_pressed(Action::Pause) {
                 ctx.audio.stop_all();
                 self.paused = Some(PauseMenu::new());
                 self.fe_acc = 0.0;
                 return None;
             }
-            if pad.pressed(Btn::Y) {
+            if pad.pressed(Btn::Y) && !crate::pad::is_bound(Btn::Y) {
                 self.view_action = match self.view_action {
                     7 => 8,
                     8 => 9,
@@ -303,10 +305,10 @@ impl Race {
                     _ => 7,
                 };
             }
-            if pad.pressed(Btn::Lb) {
+            if pad.action_pressed(Action::ZoomOut) {
                 self.cam.zoom = (self.cam.zoom + 20.0).min(1000.0);
             }
-            if pad.pressed(Btn::Rb) {
+            if pad.action_pressed(Action::ZoomIn) {
                 self.cam.zoom = (self.cam.zoom - 20.0).max(0.0);
             }
             if pad.back_held >= 1.0 {

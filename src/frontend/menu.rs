@@ -279,6 +279,8 @@ pub struct MenuState {
     glow: Option<(usize, u32)>,
     /// key rebinding: waiting for a key for this action
     pub waiting: Option<Action>,
+    /// pad poll count when the wait began
+    wait_serial: u64,
 }
 
 fn first_visible(it: &[Item]) -> usize {
@@ -287,7 +289,7 @@ fn first_visible(it: &[Item]) -> usize {
 
 impl MenuState {
     pub fn new(root: MenuId) -> MenuState {
-        MenuState { stack: vec![(root, 0)], glow: None, waiting: None }
+        MenuState { stack: vec![(root, 0)], glow: None, waiting: None, wait_serial: 0 }
     }
     pub fn top(&self) -> MenuId {
         self.stack.last().unwrap().0
@@ -350,6 +352,19 @@ impl MenuState {
         }
         // key rebinding capture
         if let Some(a) = self.waiting {
+            // a pad button pressed after the wait began binds it (Back cancels)
+            if ctx.pad.serial > self.wait_serial {
+                if let Some(&b) = ctx.pad.pressed_buttons().iter().find(|&&b| crate::pad::bindable(b) || b == crate::pad::Btn::Back) {
+                    self.waiting = None;
+                    if b == crate::pad::Btn::Back {
+                        sfx(ctx.audio, S_CHANGE);
+                    } else {
+                        crate::pad::bind(a, b);
+                        sfx(ctx.audio, S_SELECT);
+                    }
+                    return (MenuEv::None, true);
+                }
+            }
             let Some(k) = take_key(ctx) else { return (MenuEv::None, false) };
             self.waiting = None;
             if k.code != KeyCode::Escape {
@@ -424,6 +439,7 @@ impl MenuState {
                     Act::Value(ValId::Bind(a)) => {
                         if d == Dir::Enter {
                             self.waiting = Some(a);
+                            self.wait_serial = ctx.pad.serial;
                         }
                         (MenuEv::None, true)
                     }
