@@ -126,6 +126,48 @@ pub fn load_bindings() -> Bindings {
 
 thread_local! {
     static CUR: RefCell<Option<Bindings>> = const { RefCell::new(None) };
+    /// keys pressed so far while capturing a new binding
+    static PENDING: RefCell<Vec<KeyCode>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Keys per action.
+pub const MAX_KEYS: usize = 4;
+
+/// Start capturing keys for an action (OPTIONS → CONTROLS).
+pub fn begin_capture() {
+    PENDING.with(|p| p.borrow_mut().clear());
+}
+
+/// Add a key to the capture; true when the action has the maximum number of keys.
+pub fn capture_key(k: KeyCode) -> bool {
+    PENDING.with(|p| {
+        let mut p = p.borrow_mut();
+        if bindable(k) && !p.contains(&k) {
+            p.push(k);
+        }
+        p.len() >= MAX_KEYS
+    })
+}
+
+/// Make the captured keys the keys of `a` (taken away from every other action). Nothing changes
+/// when no key was captured.
+pub fn finish_capture(a: Action) {
+    let keys = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
+    if keys.is_empty() {
+        return;
+    }
+    with(|b| {
+        for (x, _) in ACTIONS {
+            b.get_mut(x).retain(|k| !keys.contains(k));
+        }
+        *b.get_mut(a) = keys;
+        store(b);
+    });
+}
+
+/// Drop the captured keys; the action keeps its old keys.
+pub fn cancel_capture() {
+    begin_capture();
 }
 
 fn with<R>(f: impl FnOnce(&mut Bindings) -> R) -> R {
@@ -137,6 +179,9 @@ fn with<R>(f: impl FnOnce(&mut Bindings) -> R) -> R {
 }
 
 fn store(b: &Bindings) {
+    if cfg!(test) {
+        return; // tests must not touch the save directory
+    }
     if *b == Bindings::default() {
         let _ = std::fs::remove_file(path());
     } else {
@@ -153,20 +198,6 @@ pub fn bindable(k: KeyCode) -> bool {
         Escape | Enter | NumpadEnter | Tab | AltLeft | AltRight | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 | F9 | F10
             | Digit1 | Digit2 | Digit3 | Digit4 | Digit5 | Digit6 | Digit7 | Digit8
     ) && key_name(k).is_some()
-}
-
-/// Bind `k` as the only key of `a` (removed from every other action).
-pub fn bind(a: Action, k: KeyCode) {
-    if !bindable(k) {
-        return;
-    }
-    with(|b| {
-        for (x, _) in ACTIONS {
-            b.get_mut(x).retain(|&y| y != k);
-        }
-        *b.get_mut(a) = vec![k];
-        store(b);
-    });
 }
 
 pub fn reset() {
@@ -246,7 +277,13 @@ pub fn bind_label(lang: usize, a: Action, waiting: bool) -> Vec<u8> {
     let mut v = label(lang, action_label(a));
     v.extend_from_slice(b": ");
     if waiting {
-        v.extend_from_slice(&label(lang, L_PRESS));
+        let pending: Vec<&str> = PENDING.with(|p| p.borrow().iter().map(|&k| key_label(k)).collect());
+        if pending.is_empty() {
+            v.extend_from_slice(&label(lang, L_PRESS));
+        } else {
+            v.extend_from_slice(pending.join(" ").as_bytes());
+            v.extend_from_slice(b" ...");
+        }
     } else {
         let names: Vec<&str> = with(|b| b.get(a).iter().map(|&k| key_label(k)).collect());
         v.extend_from_slice(names.join(" ").as_bytes());
@@ -265,6 +302,35 @@ mod tests {
 
     /// The CONTROLS items with the default keys and pad buttons fit the 640-wide screen in every
     /// language (menu font OLFNT0-1).
+    #[test]
+    fn capture_several_keys() {
+        CUR.with(|c| *c.borrow_mut() = Some(Bindings::default()));
+        // up to 4 keys, duplicates and fixed keys ignored
+        begin_capture();
+        assert!(!capture_key(KeyCode::KeyI));
+        assert!(!capture_key(KeyCode::KeyI));
+        assert!(!capture_key(KeyCode::F1));
+        assert!(!capture_key(KeyCode::KeyA)); // taken from LEFT
+        finish_capture(Action::Accelerate);
+        with(|b| {
+            assert_eq!(b.accelerate, vec![KeyCode::KeyI, KeyCode::KeyA]);
+            assert_eq!(b.left, vec![KeyCode::ArrowLeft]);
+        });
+        begin_capture();
+        for k in [KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL] {
+            assert!(!capture_key(k));
+        }
+        assert!(capture_key(KeyCode::KeyM), "the fourth key completes the capture");
+        // nothing captured, or cancelled: keys unchanged
+        begin_capture();
+        finish_capture(Action::Brake);
+        begin_capture();
+        capture_key(KeyCode::KeyQ);
+        cancel_capture();
+        finish_capture(Action::Brake);
+        with(|b| assert_eq!(b.brake, Bindings::default().brake));
+    }
+
     #[test]
     fn control_labels_fit() {
         crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());

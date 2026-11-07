@@ -78,9 +78,10 @@ plugged in at any time, and the pad last used drives the game. Names below are X
 | menus | D-pad or stick to move, A to select, B to go back |
 
 **Remapping**: in OPTIONS → CONTROLS each action shows its keys and, in brackets, its pad button
-(e.g. `MINIGUN: Z , V [A]`). Select an action and press either a key or a pad button: each action
-has one pad button, and a button taken by another action moves over. Back cancels. RESET TO
-DEFAULTS restores keys and pad buttons. Fixed on the pad: the stick and D-pad directions, Back (end
+(e.g. `MINIGUN: Z , V [A]`). Select an action, then press up to 4 keys (they replace its old keys)
+and Enter to confirm, or a pad button, which becomes its pad button and confirms at once. A key or
+button taken by another action moves over. Escape or Back cancels and keeps the old binding. RESET
+TO DEFAULTS restores keys and pad buttons. Fixed on the pad: the stick and D-pad directions, Back (end
 race) and the menu buttons (A select, B back, Start).
 
 OPTIONS → CONTROLS → ANALOG STEERING (off by default) makes the left stick steer proportionally

@@ -352,13 +352,16 @@ impl MenuState {
         }
         // key rebinding capture
         if let Some(a) = self.waiting {
-            // a pad button pressed after the wait began binds it (Back cancels)
+            // keys add up (up to 4), Enter confirms, Escape cancels; a pad button pressed after the
+            // capture began becomes the action's pad button and confirms (Back cancels)
             if ctx.pad.serial > self.wait_serial {
                 if let Some(&b) = ctx.pad.pressed_buttons().iter().find(|&&b| crate::pad::bindable(b) || b == crate::pad::Btn::Back) {
                     self.waiting = None;
                     if b == crate::pad::Btn::Back {
+                        keys::cancel_capture();
                         sfx(ctx.audio, S_CHANGE);
                     } else {
+                        keys::finish_capture(a);
                         crate::pad::bind(a, b);
                         sfx(ctx.audio, S_SELECT);
                     }
@@ -366,12 +369,27 @@ impl MenuState {
                 }
             }
             let Some(k) = take_key(ctx) else { return (MenuEv::None, false) };
-            self.waiting = None;
-            if k.code != KeyCode::Escape {
-                keys::bind(a, k.code);
-                sfx(ctx.audio, S_SELECT);
-            } else {
-                sfx(ctx.audio, S_CHANGE);
+            match k.code {
+                KeyCode::Escape => {
+                    self.waiting = None;
+                    keys::cancel_capture();
+                    sfx(ctx.audio, S_CHANGE);
+                }
+                KeyCode::Enter | KeyCode::NumpadEnter => {
+                    self.waiting = None;
+                    keys::finish_capture(a);
+                    sfx(ctx.audio, S_SELECT);
+                }
+                c if keys::bindable(c) => {
+                    if keys::capture_key(c) {
+                        self.waiting = None;
+                        keys::finish_capture(a);
+                        sfx(ctx.audio, S_SELECT);
+                    } else {
+                        sfx(ctx.audio, S_CHANGE);
+                    }
+                }
+                _ => {}
             }
             return (MenuEv::None, true);
         }
@@ -440,6 +458,7 @@ impl MenuState {
                         if d == Dir::Enter {
                             self.waiting = Some(a);
                             self.wait_serial = ctx.pad.serial;
+                            keys::begin_capture();
                         }
                         (MenuEv::None, true)
                     }
