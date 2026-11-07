@@ -207,6 +207,7 @@ language_menu = SPRACHE
 view_distance = SICHTWEITE
 antialiasing = KANTENGLÄTTUNG
 smoothing = GLÄTTUNG
+texture_filtering = TEXTURFILTER
 
 # controls menu (port addition)
 controls = STEUERUNG

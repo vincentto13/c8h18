@@ -207,6 +207,7 @@ language_menu = LINGUA
 view_distance = DISTANZA VISIVA
 antialiasing = ANTIALIASING
 smoothing = SMUSSATURA
+texture_filtering = FILTRO TEXTURE
 
 # controls menu (port addition)
 controls = COMANDI

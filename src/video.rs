@@ -14,9 +14,12 @@ pub struct Video {
     pub antialias: bool,
     /// SMOOTHING: filtered sky, sharp-bilinear scaling of the 640×480 menus and HUD
     pub smoothing: bool,
+    /// TEXTURE FILTERING: filtered, mipmapped terrain / model / billboard textures with the light
+    /// table applied as a fitted colour transform, and smooth light gradients
+    pub filtering: bool,
 }
 
-const DEFAULT: Video = Video { view: 2, antialias: true, smoothing: true };
+const DEFAULT: Video = Video { view: 2, antialias: true, smoothing: true, filtering: true };
 
 static VIDEO: Mutex<Video> = Mutex::new(DEFAULT);
 
@@ -58,7 +61,13 @@ fn save(v: &Video) {
         return;
     }
     let onoff = |b: bool| if b { "on" } else { "off" };
-    let t = format!("view_distance = {}\nantialias = {}\nsmoothing = {}\n", v.view, onoff(v.antialias), onoff(v.smoothing));
+    let t = format!(
+        "view_distance = {}\nantialias = {}\nsmoothing = {}\ntexture_filtering = {}\n",
+        v.view,
+        onoff(v.antialias),
+        onoff(v.smoothing),
+        onoff(v.filtering)
+    );
     let _ = std::fs::create_dir_all(crate::data::files::save_dir());
     if let Err(e) = std::fs::write(path(), t) {
         log::warn!("cannot write {}: {e}", path().display());
@@ -74,6 +83,7 @@ fn parse(t: &str) -> Video {
             "view_distance" => v.view = val.parse::<usize>().unwrap_or(DEFAULT.view).min(VIEW_DISTANCES.len() - 1),
             "antialias" => v.antialias = val == "on",
             "smoothing" => v.smoothing = val == "on",
+            "texture_filtering" => v.filtering = val == "on",
             _ => {}
         }
     }
@@ -93,8 +103,8 @@ mod tests {
     #[test]
     fn parse_file() {
         assert_eq!(parse(""), DEFAULT);
-        let v = parse("view_distance = 0\nantialias = off\nsmoothing = off\n");
-        assert_eq!(v, Video { view: 0, antialias: false, smoothing: false });
+        let v = parse("view_distance = 0\nantialias = off\nsmoothing = off\ntexture_filtering = off\n");
+        assert_eq!(v, Video { view: 0, antialias: false, smoothing: false, filtering: false });
         assert_eq!(parse("view_distance = 9").view, VIEW_DISTANCES.len() - 1);
         assert_eq!(v.fog_end(), 16.0);
         assert_eq!(v.fog_start(), 12.0);

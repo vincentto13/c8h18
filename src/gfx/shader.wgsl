@@ -10,6 +10,7 @@ struct Globals {
     sky: vec4<f32>,      // yaw (raw/65536 turns), pitch raw, roll raw, enabled
     screen: vec4<f32>,   // width, height, canvas_w, canvas_h
     misc: vec4<f32>,     // fade 0..1, bg_enabled, fog models (1/0), smoothing (1/0)
+    opts: vec4<f32>,     // texture filtering (1/0), 0, 0, 0
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -21,6 +22,10 @@ struct Globals {
 @group(0) @binding(6) var sky_tex: texture_2d<u32>;        // 256x256 r8uint
 @group(0) @binding(7) var lin_samp: sampler;               // linear, repeat
 @group(0) @binding(8) var sky_rgb: texture_2d<f32>;        // the sky in colour (SMOOTHING)
+// TEXTURE FILTERING: colour copies of the textures and the light rows as colour transforms
+@group(0) @binding(9) var terrain_rgb: texture_2d_array<f32>; // 64x64x256, mipmapped
+@group(0) @binding(12) var light_fit: texture_2d<f32>;        // 64x2: row r = (a at y 0, b at y 1)
+@group(0) @binding(13) var aniso_samp: sampler;               // trilinear, anisotropic, clamp
 
 fn pal(i: u32) -> vec4<f32> {
     return textureLoad(palette_tex, vec2<i32>(i32(i), 0), 0);
@@ -65,6 +70,112 @@ fn vs_world(v: VIn) -> VOut {
     return o;
 }
 
+// Light row (fractional, 0..63) applied to a colour through the fitted per-row transform, blending
+// the two neighbouring rows (used for distant, minified terrain only).
+fn light_rgb(rgb: vec3<f32>, row: f32) -> vec3<f32> {
+    let r = clamp(row, 0.0, 63.0);
+    let r0 = i32(floor(r));
+    let r1 = min(r0 + 1, 63);
+    let f = r - f32(r0);
+    let a = mix(textureLoad(light_fit, vec2<i32>(r0, 0), 0).rgb, textureLoad(light_fit, vec2<i32>(r1, 0), 0).rgb, f);
+    let b = mix(textureLoad(light_fit, vec2<i32>(r0, 1), 0).rgb, textureLoad(light_fit, vec2<i32>(r1, 1), 0).rgb, f);
+    return clamp(a * rgb + b, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Palette index lit exactly through the light table, blending the two neighbouring rows.
+fn lit(c: u32, row: f32) -> vec3<f32> {
+    let r = clamp(row, 0.0, 63.0);
+    let r0 = i32(floor(r));
+    let r1 = min(r0 + 1, 63);
+    return mix(pal(light(r0, c)).rgb, pal(light(r1, c)).rgb, r - f32(r0));
+}
+
+// Bilinear filtering of an indexed texture: the four nearest texels are lit exactly, then blended.
+fn terrain_bilinear(uv: vec2<f32>, layer: i32, row: f32) -> vec3<f32> {
+    let p = uv - 0.5;
+    let i0 = vec2<i32>(floor(p));
+    let f = fract(p);
+    var c: array<vec3<f32>, 4>;
+    let offs = array<vec2<i32>, 4>(vec2<i32>(0, 0), vec2<i32>(1, 0), vec2<i32>(0, 1), vec2<i32>(1, 1));
+    for (var k = 0; k < 4; k++) {
+        let q = clamp(i0 + offs[k], vec2<i32>(0), vec2<i32>(63));
+        c[k] = lit(textureLoad(terrain_tex, q, layer, 0).r, row);
+    }
+    return mix(mix(c[0], c[1], f.x), mix(c[2], c[3], f.x), f.y);
+}
+
+fn atlas_bilinear(uv: vec2<f32>, row: f32) -> vec3<f32> {
+    let p = uv - 0.5;
+    let i0 = vec2<i32>(floor(p));
+    let f = fract(p);
+    let mx = vec2<i32>(textureDimensions(atlas_tex)) - 1;
+    var c: array<vec3<f32>, 4>;
+    let offs = array<vec2<i32>, 4>(vec2<i32>(0, 0), vec2<i32>(1, 0), vec2<i32>(0, 1), vec2<i32>(1, 1));
+    for (var k = 0; k < 4; k++) {
+        c[k] = lit(textureLoad(atlas_tex, clamp(i0 + offs[k], vec2<i32>(0), mx), 0).r, row);
+    }
+    return mix(mix(c[0], c[1], f.x), mix(c[2], c[3], f.x), f.y);
+}
+
+// Billboards: premultiplied by the opaque flag, so the transparent surround fades out at the edge.
+fn tmap_bilinear(uv: vec2<f32>, row: f32) -> vec4<f32> {
+    let p = uv - 0.5;
+    let i0 = vec2<i32>(floor(p));
+    let f = fract(p);
+    var c: array<vec4<f32>, 4>;
+    let offs = array<vec2<i32>, 4>(vec2<i32>(0, 0), vec2<i32>(1, 0), vec2<i32>(0, 1), vec2<i32>(1, 1));
+    for (var k = 0; k < 4; k++) {
+        let t = textureLoad(tmap_tex, clamp(i0 + offs[k], vec2<i32>(0), vec2<i32>(1023)), 0);
+        if (t.g != 0u) { c[k] = vec4<f32>(lit(t.r, row), 1.0); } else { c[k] = vec4<f32>(0.0); }
+    }
+    return mix(mix(c[0], c[1], f.x), mix(c[2], c[3], f.x), f.y);
+}
+
+// TEXTURE FILTERING path: the same light and haze rules without the integer steps; textures are
+// filtered after lighting (exact colours), distant terrain uses the mipmapped colour copy.
+fn shade_filtered(i: VOut, duvdx: vec2<f32>, duvdy: vec2<f32>) -> vec4<f32> {
+    let k = i.kind & 0xffu;
+    let fogm = i.kind >> 8u;
+    var row = i.lightv;
+    let fs = g.fog.x;
+    let fe = g.fog.y;
+    if (fogm == 1u) {
+        if (i.hdist > g.fog.z) { discard; }
+        if (i.depth > fe) { row = 0.0; }
+        else if (i.depth > fs) { row = mix(row, 0.5, (i.depth - fs) / (fe - fs)); }
+    } else if (fogm == 2u) {
+        if (i.depth >= fe) { row = 0.0; }
+        else if (i.depth > fs) { row = min(row, (fe - i.depth) * 32.0 / (fe - fs)); }
+    } else if (g.misc.z > 0.5) {
+        if (i.depth > fe) { row = 0.0; }
+        else if (i.depth > fs) { row = mix(row, 0.5, (i.depth - fs) / (fe - fs)); }
+    }
+    var rgb = vec3<f32>(0.0);
+    var alpha = 1.0;
+    if (k == 0u) {
+        // texels per screen pixel: up to 1 exact bilinear, from 2 the mipmaps, blended in between
+        let lod = log2(max(max(length(duvdx), length(duvdy)), 1e-6));
+        let w = clamp(lod, 0.0, 1.0);
+        if (w < 1.0) {
+            rgb = terrain_bilinear(i.uv, i32(i.param), row);
+        }
+        if (w > 0.0) {
+            let far = light_rgb(textureSampleGrad(terrain_rgb, aniso_samp, i.uv / 64.0, i32(i.param), duvdx / 64.0, duvdy / 64.0).rgb, row);
+            rgb = mix(rgb, far, w);
+        }
+    } else if (k == 1u) {
+        rgb = atlas_bilinear(i.uv, row);
+    } else if (k == 2u) {
+        rgb = lit(i.param & 0xffu, row);
+    } else {
+        let t = tmap_bilinear(i.uv, row);
+        if (t.a < 0.5) { discard; }
+        rgb = t.rgb / t.a;
+        if ((i.param & 0xffu) != 0u) { alpha = 0.5; }
+    }
+    return vec4<f32>(rgb, alpha);
+}
+
 // kind & 0xff: 0 terrain, 1 model atlas, 2 flat colour, 3 billboard
 // kind >> 8: fog mode 0 none, 1 terrain, 2 sprite
 fn shade(i: VOut) -> vec4<f32> {
@@ -107,6 +218,12 @@ fn shade(i: VOut) -> vec4<f32> {
 
 @fragment
 fn fs_world(i: VOut) -> @location(0) vec4<f32> {
+    // derivatives first, in uniform control flow (used by the filtered terrain lookup)
+    let duvdx = dpdx(i.uv);
+    let duvdy = dpdy(i.uv);
+    if (g.opts.x > 0.5) {
+        return shade_filtered(i, duvdx, duvdy);
+    }
     return shade(i);
 }
 

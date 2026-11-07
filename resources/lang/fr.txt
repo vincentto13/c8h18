@@ -207,6 +207,7 @@ language_menu = LANGUE
 view_distance = DISTANCE DE VUE
 antialiasing = ANTICRENELAGE
 smoothing = LISSAGE
+texture_filtering = FILTRAGE TEXTURES
 
 # controls menu (port addition)
 controls = COMMANDES

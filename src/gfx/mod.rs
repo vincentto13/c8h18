@@ -9,6 +9,39 @@ use winit::window::Window;
 
 /// Samples per pixel of the 3D view with ANTI-ALIASING on.
 const MSAA: u32 = 4;
+/// Mip levels of the 64x64 terrain textures (64 .. 1).
+const TERRAIN_MIPS: u32 = 7;
+/// Empty texels between packed billboard images, so filtering does not bleed between them.
+const TMAP_GAP: u32 = 2;
+
+/// Fit each light-table row as a per-channel colour transform `out = a * in + b` (colours 0..1),
+/// weighted by how often each palette entry is used. Returns per row [a.r, a.g, a.b, b.r, b.g, b.b].
+/// The light table is close to such a transform (about 1 % mean error on the game's tracks).
+pub fn fit_light_rows(pal_rgba: &[u8], table: &[u8], weight: &[f64; 256]) -> Vec<[f32; 6]> {
+    let col = |i: usize, ch: usize| pal_rgba.get(i * 4 + ch).copied().unwrap_or(0) as f64 / 255.0;
+    (0..64)
+        .map(|row| {
+            let mut out = [0f32; 6];
+            for ch in 0..3 {
+                let (mut sw, mut sx, mut sy, mut sxx, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+                for i in 0..256 {
+                    let (x, y, w) = (col(i, ch), col(table.get(row * 256 + i).copied().unwrap_or(0) as usize, ch), weight[i]);
+                    sw += w;
+                    sx += w * x;
+                    sy += w * y;
+                    sxx += w * x * x;
+                    sxy += w * x * y;
+                }
+                let d = sw * sxx - sx * sx;
+                let a = if d.abs() > 1e-12 { (sw * sxy - sx * sy) / d } else { 0.0 };
+                let b = (sy - a * sx) / sw;
+                out[ch] = a as f32;
+                out[3 + ch] = b as f32;
+            }
+            out
+        })
+        .collect()
+}
 
 /// The 3D pipelines for one sample count.
 struct ScenePipes {
@@ -107,6 +140,8 @@ struct Globals {
     sky: [f32; 4],
     screen: [f32; 4],
     misc: [f32; 4],
+    /// texture filtering (1/0), 0, 0, 0
+    opts: [f32; 4],
 }
 
 pub struct Gfx {
@@ -130,6 +165,15 @@ pub struct Gfx {
     linear_sampler: wgpu::Sampler,
     sky_idx: Vec<u8>,
     pal_rgba: Vec<u8>,
+    /// TEXTURE FILTERING: colour copies of the indexed textures, rebuilt when palette or data change
+    terrain_rgb_tex: wgpu::Texture,
+    /// per light row: (a.rgb, b.rgb) of the fitted colour transform `a * colour + b` (row 0..63)
+    light_fit_tex: wgpu::Texture,
+    aniso_sampler: wgpu::Sampler,
+    terrain_idx: Vec<u8>,
+    atlas_idx: Vec<u8>,
+    table: Vec<u8>,
+    rgb_dirty: bool,
     scene_tex: wgpu::Texture,
     depth_tex: wgpu::Texture,
     /// multisampled colour and depth targets (ANTI-ALIASING), created on first use
@@ -226,6 +270,14 @@ impl Gfx {
                     count: None,
                 },
                 tex_entry(8, ST::Float { filterable: true }, VD::D2),
+                tex_entry(9, ST::Float { filterable: true }, VD::D2Array),
+                tex_entry(12, ST::Float { filterable: false }, VD::D2),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 13,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let bind1_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -325,6 +377,24 @@ impl Gfx {
         let tmap_tex = tex2d(&device, 1024, 1024, 1, TF::Rg8Uint, sampled);
         let sky_tex = tex2d(&device, 256, 256, 1, TF::R8Uint, sampled);
         let sky_rgb_tex = tex2d(&device, 256, 256, 1, TF::Rgba8Unorm, sampled);
+        let terrain_rgb_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("terrain rgb"),
+            size: wgpu::Extent3d { width: 64, height: 64, depth_or_array_layers: 256 },
+            mip_level_count: TERRAIN_MIPS,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TF::Rgba8Unorm,
+            usage: sampled,
+            view_formats: &[],
+        });
+        let light_fit_tex = tex2d(&device, 64, 2, 1, TF::Rgba32Float, sampled);
+        let aniso_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..Default::default()
+        });
         let linear_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::Repeat,
             address_mode_v: wgpu::AddressMode::Repeat,
@@ -370,6 +440,13 @@ impl Gfx {
             linear_sampler,
             sky_idx: vec![0; 65536],
             pal_rgba: vec![0; 1024],
+            terrain_rgb_tex,
+            light_fit_tex,
+            aniso_sampler,
+            terrain_idx: vec![0; 1 << 20],
+            atlas_idx: Vec::new(),
+            table: vec![0; 83968],
+            rgb_dirty: true,
             scene_tex,
             depth_tex,
             msaa: None,
@@ -395,6 +472,10 @@ impl Gfx {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             ..Default::default()
         });
+        let terrain_rgb_view = self.terrain_rgb_tex.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
         self.bind0 = Some(self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.bind0_layout,
@@ -408,13 +489,21 @@ impl Gfx {
                 wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(&v(&self.sky_tex)) },
                 wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&self.linear_sampler) },
                 wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&v(&self.sky_rgb_tex)) },
+                wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&terrain_rgb_view) },
+                wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&v(&self.light_fit_tex)) },
+                wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::Sampler(&self.aniso_sampler) },
             ],
         }));
     }
 
     fn write_tex(&self, tex: &wgpu::Texture, data: &[u8], w: u32, h: u32, layer: u32, bpp: u32) {
+        self.write_tex_mip(tex, data, w, h, layer, bpp, 0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn write_tex_mip(&self, tex: &wgpu::Texture, data: &[u8], w: u32, h: u32, layer: u32, bpp: u32, mip: u32) {
         self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 0, z: layer }, aspect: wgpu::TextureAspect::All },
+            wgpu::TexelCopyTextureInfo { texture: tex, mip_level: mip, origin: wgpu::Origin3d { x: 0, y: 0, z: layer }, aspect: wgpu::TextureAspect::All },
             data,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * bpp), rows_per_image: Some(h) },
             wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
@@ -468,6 +557,54 @@ impl Gfx {
         (c.create_view(&Default::default()), d.create_view(&Default::default()))
     }
 
+    /// Rebuild the colour copies (sky, terrain with mipmaps) and the light fit after the palette, the
+    /// colour table or a texture changed.
+    fn update_rgb(&mut self) {
+        self.rgb_dirty = false;
+        self.update_sky_rgb();
+        let pal = |i: u8| -> [u8; 4] {
+            let o = i as usize * 4;
+            [self.pal_rgba[o], self.pal_rgba[o + 1], self.pal_rgba[o + 2], 255]
+        };
+        // terrain: 256 textures of 64x64 with a box-filtered mip chain
+        for layer in 0..256usize {
+            let mut img: Vec<[f32; 4]> = self.terrain_idx[layer * 4096..layer * 4096 + 4096].iter().map(|&i| pal(i).map(|v| v as f32)).collect();
+            let mut size = 64usize;
+            for mip in 0..TERRAIN_MIPS {
+                let bytes: Vec<u8> = img.iter().flat_map(|p| p.map(|v| v.round().clamp(0.0, 255.0) as u8)).collect();
+                self.write_tex_mip(&self.terrain_rgb_tex, &bytes, size as u32, size as u32, layer as u32, 4, mip);
+                if size == 1 {
+                    break;
+                }
+                let half = size / 2;
+                let mut next = vec![[0f32; 4]; half * half];
+                for y in 0..half {
+                    for x in 0..half {
+                        let s = |dx: usize, dy: usize| img[(y * 2 + dy) * size + x * 2 + dx];
+                        let (a, b, c, d) = (s(0, 0), s(1, 0), s(0, 1), s(1, 1));
+                        next[y * half + x] = [0, 1, 2, 3].map(|k| (a[k] + b[k] + c[k] + d[k]) / 4.0);
+                    }
+                }
+                img = next;
+                size = half;
+            }
+        }
+        // light rows as colour transforms, fitted on the colours the textures use
+        let mut weight = [0.05f64; 256];
+        for &i in self.terrain_idx.iter().chain(self.atlas_idx.iter()) {
+            weight[i as usize] += 1.0;
+        }
+        let fit = fit_light_rows(&self.pal_rgba, &self.table, &weight);
+        let mut d: Vec<f32> = Vec::with_capacity(64 * 2 * 4);
+        for half in 0..2 {
+            for row in &fit {
+                let v = &row[half * 3..half * 3 + 3];
+                d.extend_from_slice(&[v[0], v[1], v[2], 0.0]);
+            }
+        }
+        self.write_tex(&self.light_fit_tex, bytemuck::cast_slice(&d), 64, 2, 0, 16);
+    }
+
     /// The sky in colour (palette applied) for filtered sampling.
     fn update_sky_rgb(&self) {
         let mut d = Vec::with_capacity(65536 * 4);
@@ -488,25 +625,31 @@ impl Gfx {
         }
         self.write_tex(&self.palette_tex, &d, 256, 1, 0, 4);
         self.pal_rgba = d;
-        self.update_sky_rgb();
+        self.rgb_dirty = true;
     }
     pub fn set_colour_table(&mut self, data: &[u8]) {
         self.write_tex(&self.light_tex, &data[..83968], 256, 328, 0, 1);
+        self.table = data[..83968].to_vec();
+        self.rgb_dirty = true;
     }
     pub fn set_terrain_textures(&mut self, data: &[u8]) {
         for i in 0..256u32 {
             let o = (i * 4096) as usize;
             self.write_tex(&self.terrain_tex, &data[o..o + 4096], 64, 64, i, 1);
         }
+        self.terrain_idx = data[..1 << 20].to_vec();
+        self.rgb_dirty = true;
     }
     pub fn set_sky(&mut self, data: &[u8]) {
         self.write_tex(&self.sky_tex, &data[..65536], 256, 256, 0, 1);
         self.sky_idx = data[..65536].to_vec();
-        self.update_sky_rgb();
+        self.rgb_dirty = true;
     }
     pub fn set_model_atlas(&mut self, pix: &[u8], h: u32) {
         let h = h.min(768);
         self.write_tex(&self.atlas_tex, &pix[..(256 * h) as usize], 256, h, 0, 1);
+        self.atlas_idx = pix[..(256 * h) as usize].to_vec();
+        self.rgb_dirty = true;
     }
     /// Pack the billboard images into the tmap texture (shelf packing); colour 0 is transparent.
     pub fn set_tmaps(&mut self, imgs: &[crate::data::tmaps::TmapImage]) {
@@ -516,7 +659,7 @@ impl Gfx {
         for im in imgs {
             if x + im.w > 1024 {
                 x = 0;
-                y += shelf;
+                y += shelf + TMAP_GAP;
                 shelf = 0;
             }
             self.tmap_pos.push((x, y));
@@ -530,10 +673,11 @@ impl Gfx {
                     }
                 }
             }
-            x += im.w;
+            x += im.w + TMAP_GAP;
             shelf = shelf.max(im.h);
         }
         self.write_tex(&self.tmap_tex, &data, 1024, 1024, 0, 2);
+
     }
     /// Upload the static level mesh.
     pub fn set_terrain_mesh(&mut self, verts: &[Vertex]) {
@@ -580,6 +724,10 @@ impl Gfx {
         let mut glob = Globals::default();
         glob.screen = [w as f32, h as f32, fg.w as f32, fg.h as f32];
         glob.misc = [fade.clamp(0.0, 1.0), bg.is_some() as u32 as f32, video.fog_models() as u32 as f32, video.smoothing as u32 as f32];
+        glob.opts = [video.filtering as u32 as f32, 0.0, 0.0, 0.0];
+        if scene.is_some() && self.rgb_dirty {
+            self.update_rgb();
+        }
         if let Some(s) = scene {
             let (r, u, f) = s.camera.basis();
             let focal = if s.camera.fixed_43 { s.camera.focal320 * (h as f32 * 4.0 / 3.0) / 320.0 } else { self.focal_px(s.camera.focal320) };

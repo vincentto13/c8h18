@@ -41,8 +41,13 @@ none of them changes the game itself:
 | VIEW DISTANCE | how far the world is drawn: 16 cells (the original), 32 or 48; the haze keeps the original proportions, and beyond the original distance crafts and objects fade into it like the terrain | 48 |
 | ANTI-ALIASING | 4× multisampling of the 3D view | on |
 | SMOOTHING | filtered sky, sharp-bilinear scaling of the 640×480 menus and HUD (even pixel sizes at any window size) | on |
+| TEXTURE FILTERING | smooth textures on the ground, blocks, crafts and billboards, mipmapped and anisotropically filtered in the distance (no shimmer), and smooth light gradients instead of the 64 light steps | on |
 
-With VIEW DISTANCE at the first step and the other two off the picture matches the original.
+Texture filtering keeps the original colours: close up, the four nearest texels are each lit through
+the track's light table and then blended; in the distance, where texels are smaller than a pixel,
+the mipmapped colour copy is used with the light table applied as a fitted per-row colour transform
+(about 1 % mean difference). With VIEW DISTANCE at the first step and the other options off the
+picture matches the original.
 
 ## Languages
 

@@ -207,6 +207,7 @@ language_menu = IDIOMA
 view_distance = DISTANCIA VISUAL
 antialiasing = ANTIALIAS
 smoothing = SUAVIZADO
+texture_filtering = FILTRADO TEXTURAS
 
 # controls menu (port addition)
 controls = CONTROLES

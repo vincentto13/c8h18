@@ -58,6 +58,7 @@ pub enum ValId {
     ViewDistance,
     Antialias,
     Smoothing,
+    Filtering,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -171,6 +172,7 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             Item { adjustable: true, ..item(named_bar(l, "view_distance", video.view + 1, crate::video::VIEW_DISTANCES.len()), Act::Value(ValId::ViewDistance)) },
             Item { adjustable: true, ..item(named_onoff(l, "antialiasing", video.antialias), Act::Value(ValId::Antialias)) },
             Item { adjustable: true, ..item(named_onoff(l, "smoothing", video.smoothing), Act::Value(ValId::Smoothing)) },
+            Item { adjustable: true, ..item(named_onoff(l, "texture_filtering", video.filtering), Act::Value(ValId::Filtering)) },
             item(st(l, 56), Act::Back),
         ],
         MenuId::Sound => vec![
@@ -254,6 +256,7 @@ fn value(v: ValId, d: Dir, ctx: &mut Ctx) {
         }),
         ValId::Antialias => crate::video::update(|v| v.antialias = !v.antialias),
         ValId::Smoothing => crate::video::update(|v| v.smoothing = !v.smoothing),
+        ValId::Filtering => crate::video::update(|v| v.filtering = !v.filtering),
         ValId::Texture => {
             match d {
                 Dir::Left => {
