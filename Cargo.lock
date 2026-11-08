@@ -840,6 +840,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
+name = "c8-data"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "c8-game"
 version = "0.1.0"
 dependencies = [
@@ -848,6 +855,7 @@ dependencies = [
  "env_logger",
  "gilrs",
  "glam",
+ "c8-data",
  "log",
  "oplon",
  "png",

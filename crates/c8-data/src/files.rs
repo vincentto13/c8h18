@@ -1,20 +1,22 @@
 //! Case-insensitive data directory access.
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::RwLock;
 
-static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+static DATA_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
+/// Set the data directory (default `resources`). Can be changed later, e.g. when the editor opens
+/// another game folder.
 pub fn set_data_dir(p: PathBuf) {
-    let _ = DATA_DIR.set(p);
+    *DATA_DIR.write().unwrap_or_else(|e| e.into_inner()) = Some(p);
 }
 
-pub fn data_dir() -> &'static Path {
-    DATA_DIR.get_or_init(|| PathBuf::from("resources"))
+pub fn data_dir() -> PathBuf {
+    DATA_DIR.read().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| PathBuf::from("resources"))
 }
 
 /// Resolve a relative path like "data/palet0-0.dat" case-insensitively.
 pub fn resolve(rel: &str) -> Option<PathBuf> {
-    let mut cur = data_dir().to_path_buf();
+    let mut cur = data_dir();
     for part in rel.split('/') {
         let direct = cur.join(part);
         if direct.exists() {

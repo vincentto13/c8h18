@@ -1,7 +1,7 @@
 mod assets;
 mod audio;
 mod ctx;
-mod data;
+use c8_data as data;
 mod frontend;
 mod gfx;
 mod input;

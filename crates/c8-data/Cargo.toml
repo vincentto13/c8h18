@@ -1,0 +1,9 @@
+[package]
+name = "c8-data"
+description = "Data file formats of the game (levels, images, models, fonts, strings, config), shared by the game and the editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+log.workspace = true

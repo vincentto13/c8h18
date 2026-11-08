@@ -128,13 +128,12 @@ pub fn to_cp437(s: &str) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// Every language file loads, has the whole table and every named key, and every entry fits
-    /// the 640-wide screen in the large menu font.
+    /// Every language file loads, has the whole table and every named key, and every entry has
+    /// glyphs in the fonts. (The game crate checks that the entries fit the screen.)
     #[test]
     fn language_files_complete() {
-        super::super::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
+        crate::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
         load().expect("load");
-        let font = super::super::sprites::Font::load("olfnt0-1", true).expect("font");
         let en = &langs()[0];
         let mut problems = Vec::new();
         for (i, l) in langs().iter().enumerate() {
@@ -143,10 +142,6 @@ mod tests {
                 match &l.table[n] {
                     None => problems.push(format!("{code}: {n:03} missing")),
                     Some(s) => {
-                        let w = crate::gfx::canvas::Canvas::text_width(&font, &to_cp437(s), 0);
-                        if w > 640 {
-                            println!("{code} {n:03} {w}px: {s}");
-                        }
                         if to_cp437(s).contains(&b'?') && !s.contains('?') {
                             problems.push(format!("{code}: {n:03} has characters without glyphs: {s}"));
                         }

@@ -10,7 +10,7 @@
 //!   cargo run --release --example audio_test -- note P N OUT   render one note N on melodic timbre P to WAV
 #![allow(dead_code)]
 
-mod data;
+use c8_data as data;
 #[path = "../../src/audio/mod.rs"]
 mod audio;
 #[path = "../../src/intro.rs"]

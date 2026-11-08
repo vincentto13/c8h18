@@ -143,3 +143,27 @@ impl Canvas {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::{files, strings};
+
+    /// Every UI string, in every language, fits the 640-wide screen in the large menu font
+    /// (reported, not enforced: a few original strings are wider and are drawn clipped).
+    #[test]
+    fn strings_fit_screen() {
+        files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
+        strings::load().expect("load");
+        let font = Font::load("olfnt0-1", true).expect("font");
+        for lang in 0..strings::count() {
+            for n in 0..strings::COUNT {
+                let s = strings::get(lang, n);
+                let w = Canvas::text_width(&font, &strings::to_cp437(s), 0);
+                if w > 640 {
+                    println!("{} {n:03} {w}px: {s}", strings::CODES[lang]);
+                }
+            }
+        }
+    }
+}
