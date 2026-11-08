@@ -490,6 +490,11 @@ fn main() {
             let rings = data::images::load_search_rings().unwrap();
             race::headless(t, n, rings, true);
             return;
+        } else if l == "--level" {
+            if let Some(p) = args.get(i + 1) {
+                let _ = race::LEVEL_FILE.set(p.into());
+            }
+            i += 1;
         } else if l == "--race" || l == "--demo" {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             opts.race = Some((t, l == "--demo"));

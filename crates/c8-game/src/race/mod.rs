@@ -33,6 +33,18 @@ use types::{PlayerResult, RaceResult, RaceSetup, POINTS};
 /// Game speed in percent of the design rate of 20 ticks per second (default 90 %).
 pub static SPEED_PCT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(90);
 
+/// Port addition (`--level <file>`, used by the editor's "Test in game"): race on this level file
+/// instead of the track's own; the track number still picks textures, sky, colour table and music.
+pub static LEVEL_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// The level for track t: the `--level` file if one was given, else MAPS/LEVEL0-t.DAT.
+pub fn load_level(t: usize) -> Result<Level, String> {
+    match LEVEL_FILE.get() {
+        Some(p) => Level::read_file(p),
+        None => Level::load(t),
+    }
+}
+
 /// Length of one simulation tick in real seconds. The simulation always advances in whole
 /// fixed ticks (independent of the frame rate); drawing interpolates between them.
 pub fn tick_secs() -> f64 {
@@ -71,7 +83,7 @@ pub struct Race {
 impl Race {
     pub fn new(setup: RaceSetup, ctx: &mut Ctx, gfx: &mut Gfx) -> Result<Race, String> {
         let t = setup.track.clamp(1, 6);
-        let lvl = Level::load(t)?;
+        let lvl = load_level(t)?;
         let table = Rc::new(ColourTable::load(t - 1)?);
         gfx.set_colour_table(&table.data);
         gfx.set_terrain_textures(&load_terrain_textures(t - 1)?);
@@ -732,7 +744,7 @@ impl Race {
 
 /// Debug: run a race without graphics and print the crafts' progress.
 pub fn headless(track: usize, ticks: u32, rings: Vec<Vec<(i32, i32)>>, demo: bool) {
-    let lvl = Level::load(track).expect("level");
+    let lvl = load_level(track).expect("level");
     let mut w = World::new(lvl, rings);
     w.demo = demo;
     println!("waypoints {} walls {} checkpoints {} start cells {:?} heading {}", w.track.wps.len() - 1, w.track.walls.len(), w.track.checkpoints.len(), &w.track.start_cells[..w.track.start_cells.len().min(8)], w.track.start_heading);

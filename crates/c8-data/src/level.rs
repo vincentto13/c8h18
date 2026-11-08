@@ -24,7 +24,20 @@ pub const MAX_BLOCKS: usize = 1024;
 const THING_RECORDS: usize = 1000;
 const REGION_SLOTS: usize = 10;
 
-#[derive(Clone, Copy, Default, Debug)]
+/// Texture corner coordinates (u, v as 0/1) of the floor orientations 0..7 (spec 08 §5.2), for the
+/// quad corners (x, y), (x+1, y), (x+1, y+1), (x, y+1).
+pub const FLOOR_UV: [[(u8, u8); 4]; 8] = [
+    [(0, 0), (1, 0), (1, 1), (0, 1)],
+    [(1, 0), (0, 0), (0, 1), (1, 1)],
+    [(0, 1), (1, 1), (1, 0), (0, 0)],
+    [(1, 1), (0, 1), (0, 0), (1, 0)],
+    [(0, 0), (0, 1), (1, 1), (1, 0)],
+    [(0, 1), (0, 0), (1, 0), (1, 1)],
+    [(1, 0), (1, 1), (0, 1), (0, 0)],
+    [(1, 1), (1, 0), (0, 0), (0, 1)],
+];
+
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct Cell {
     pub light: i16,
     /// 8.8 corner height

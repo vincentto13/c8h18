@@ -39,6 +39,7 @@ Options:
 | `--speed N` | game speed in percent of the original 20 ticks/s (default 90; e.g. 100 = original, 80 = slower) |
 | `<path>` or `GAME_DATA=<path>` | data directory (DATA/, MAPS/, OBJECTS/, SOUND/) |
 | `--race N` / `--demo N` | debug: go straight to a race / demo race on track N |
+| `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
@@ -128,12 +129,22 @@ cargo run --release -p c8-edit -- [--data <game data folder>] [<file>]
 `c8h18-edit` asks for the game data folder on the first start (or takes `--data`) and lists its
 files by kind. Levels open in a top-down map with switchable views (textures with lighting,
 height, light), overlays (block columns, entities with walls, waypoint links and checkpoints,
-chargers and start area, grid) and a cell inspector; the first editing tool is a terrain height
-brush with undo/redo (⌘Z / ⇧⌘Z). Saving writes an unpacked level; originals in the data folder
-are never overwritten (Save asks for a new name). Other resource kinds open read-only, with a
-preview for palettes, terrain textures, skies and language files. Pan with the scroll wheel or a
-right/middle drag, zoom with pinch or Ctrl/⌘ + wheel. The plan, including the built-in MCP server,
-is in `docs/editor-plan.md`.
+chargers and start area, grid) and a cell inspector. Tools (keys in brackets):
+
+| Tool | Use |
+|---|---|
+| Inspect (I) | cell details under the pointer |
+| Height (H) | drag to raise, Shift+drag to lower; radius and step |
+| Texture (T) | paint or flood-fill with a texture from the level's set, in any orientation (R rotates, F mirrors); Alt+click picks from the map; edit the texture's attributes (e.g. the "track" bit) |
+| Light (L) | paint brighter / darker (Shift), smooth, or bake from a light direction and the slopes into the selection or the whole map |
+| Select (S) | drag a rectangle; ⌘C copies, ⌘V pastes (click to place) heights, textures and light |
+
+Every stroke is one undo step (⌘Z / ⇧⌘Z). **Test in game** saves to a temporary file and starts
+`c8h18 --race N --level <file>` (the game next to the editor, or on the PATH). Saving writes an
+unpacked level; originals in the data folder are never overwritten (Save asks for a new name).
+Other resource kinds open read-only, with a preview for palettes, terrain textures, skies and
+language files. Pan with the scroll wheel or a right/middle drag, zoom with pinch or Ctrl/⌘ +
+wheel. The plan, including the built-in MCP server, is in `docs/editor-plan.md`.
 
 ## Debug automation
 
@@ -141,4 +152,4 @@ is in `docs/editor-plan.md`.
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
-30 frames and quits.
+30 frames and quits; `HIEDIT_TOOL=height|texture|light|select` starts with that tool.
