@@ -1,0 +1,18 @@
+[package]
+name = "c8-edit"
+description = "Level and resource editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "c8h18-edit"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11", "persistence"] }
+env_logger = "0.11.11"
+c8-data = { path = "../c8-data" }
+log.workspace = true
+png.workspace = true
+rfd = "0.18.0"

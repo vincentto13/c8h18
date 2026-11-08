@@ -11,11 +11,23 @@ original data files in `resources/`.
 - The 320×200 mode and the network game are not included. Where the spec lists "port deviations",
   this version follows them.
 
+## Repository layout
+
+A Cargo workspace with three crates:
+
+| Crate | What | Binary |
+|---|---|---|
+| `crates/c8-data` | the data file formats (spec 01), read and write; shared by the game and the editor | |
+| `crates/c8-game` | the game | `c8h18` |
+| `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
+
 ## Build and run
 
 ```
-cargo build --release
+cargo build --release                # the game (the workspace's default member)
 ./target/release/c8h18            # data directory defaults to ./resources
+cargo build --release --workspace    # game and editor
+cargo test --workspace               # all tests
 ```
 
 Options:
@@ -107,9 +119,26 @@ instead of fully left or right; the D-pad still steers fully. Pad settings are s
 `save/pad.txt` (`analog_steering = on|off` and `<action> = <button>` lines). The name
 entry needs the keyboard. Rumble is not supported (the controller library has none on macOS).
 
+## Editor
+
+```
+cargo run --release -p c8-edit -- [--data <game data folder>] [<file>]
+```
+
+`c8h18-edit` asks for the game data folder on the first start (or takes `--data`) and lists its
+files by kind. Levels open in a top-down map with switchable views (textures with lighting,
+height, light), overlays (block columns, entities with walls, waypoint links and checkpoints,
+chargers and start area, grid) and a cell inspector; the first editing tool is a terrain height
+brush with undo/redo (⌘Z / ⇧⌘Z). Saving writes an unpacked level; originals in the data folder
+are never overwritten (Save asks for a new name). Other resource kinds open read-only, with a
+preview for palettes, terrain textures, skies and language files. Pan with the scroll wheel or a
+right/middle drag, zoom with pinch or Ctrl/⌘ + wheel. The plan, including the built-in MCP server,
+is in `docs/editor-plan.md`.
+
 ## Debug automation
 
 `C8H18_AUTO="frame:op:arg;..."` runs scripted input. The ops are `shot:<png path>`,
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
-screenshot tests.
+screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
+30 frames and quits.
