@@ -1119,7 +1119,7 @@ mod tests {
 
     #[test]
     fn crafts_do_not_climb_block_walls() {
-        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
         let mut report = Vec::new();
         for track in 1..=6 {
             let (c, n) = wall_climbs(track);

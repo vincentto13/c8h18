@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn control_labels_fit() {
-        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
         crate::data::strings::load().expect("strings");
         let font = crate::data::sprites::Font::load("olfnt0-1", true).expect("font");
         CUR.with(|c| *c.borrow_mut() = Some(Bindings::default()));

@@ -1,0 +1,23 @@
+[package]
+name = "c8-game"
+description = "The game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "c8h18"
+path = "src/main.rs"
+
+[dependencies]
+bytemuck = { version = "1.25.2", features = ["derive"] }
+cpal = "0.18.2"
+env_logger = "0.11.11"
+gilrs = "0.11.2"
+glam = "0.34.2"
+log.workspace = true
+oplon = "1.0.0"
+png.workspace = true
+pollster = "1.0.1"
+wgpu = "30.0.1"
+winit = "0.30.13"

@@ -132,7 +132,7 @@ mod tests {
     /// the 640-wide screen in the large menu font.
     #[test]
     fn language_files_complete() {
-        super::super::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        super::super::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
         load().expect("load");
         let font = super::super::sprites::Font::load("olfnt0-1", true).expect("font");
         let en = &langs()[0];

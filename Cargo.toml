@@ -1,17 +1,14 @@
-[package]
-name = "c8h18"
+[workspace]
+members = ["crates/*"]
+# plain `cargo build` / `cargo run` / `cargo test` work on the game, as before the split
+default-members = ["crates/c8-game"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "GPL-3.0-or-later"
 
-[dependencies]
-bytemuck = { version = "1.25.2", features = ["derive"] }
-cpal = "0.18.2"
-env_logger = "0.11.11"
-gilrs = "0.11.2"
-glam = "0.34.2"
+[workspace.dependencies]
 log = "0.4.35"
-oplon = "1.0.0"
 png = "0.18.1"
-pollster = "1.0.1"
-wgpu = "30.0.1"
-winit = "0.30.13"
