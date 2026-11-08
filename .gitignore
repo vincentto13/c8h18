@@ -3,3 +3,4 @@
 !/resources/lang/
 /save
 .DS_Store
+/.claude/

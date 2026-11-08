@@ -423,7 +423,7 @@ impl World {
         // l hover height
         let (nx, ny) = (c.pos[0] + mv[0], c.pos[1] + mv[1]);
         let mut y = (c.sensors[0].0 + c.sensors[1].0) / 2.0;
-        let ground = self.floor(nx, ny, y + 0.25);
+        let ground = self.lvl.surface_below(nx, ny, y + 0.25);
         if y - ground < 151.0 * U {
             c.airborne = false;
             if y - ground < 100.0 * U {
@@ -548,7 +548,7 @@ impl World {
                 }
             }
             let (mut zpos, mut zdisp) = c.sensors[k];
-            let floor = self.floor(nx, ny, zpos.max(h) + 0.3);
+            let floor = self.lvl.surface_below(nx, ny, zpos.max(h) + 0.3);
             c.sensor_floor[k] = floor;
             let rest = floor + 50.0 * U;
             if zpos >= rest {
@@ -1052,5 +1052,80 @@ impl Craft {
     /// The death is counted once: when the shield first runs out while racing (action switches next tick).
     pub fn deaths_pending_check(&self) -> bool {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::level::Level;
+
+    /// Drive straight into block walls (all four directions) and count how often the craft ends up
+    /// on top of the blocks instead of being stopped.
+    fn wall_climbs(track: usize) -> (usize, usize) {
+        let lvl = Level::load(track).expect("level");
+        let mut w = World::new(lvl, Vec::new());
+        let mut cases = Vec::new();
+        for y in 4..156 {
+            for x in 4..252 {
+                let Some(col) = w.lvl.column(x, y) else { continue };
+                if col.mask & 3 != 3 {
+                    continue; // want a wall at least two blocks high from the ground
+                }
+                for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                    // approach from 3 cells away, through three free cells
+                    let free = (1..=3).all(|k| w.lvl.column(x - dx * k, y - dy * k).is_none());
+                    if !free {
+                        continue;
+                    }
+                    let h0 = w.lvl.terrain_height(x as f32 + 0.5 - dx as f32 * 2.0, y as f32 + 0.5 - dy as f32 * 2.0);
+                    let h1 = w.lvl.terrain_height(x as f32 + 0.5, y as f32 + 0.5);
+                    if (h0 - h1).abs() > 0.3 {
+                        continue;
+                    }
+                    cases.push((x, y, dx, dy));
+                }
+            }
+        }
+        cases.truncate(200);
+        let mut climbs = 0;
+        for &(x, y, dx, dy) in &cases {
+            w.crafts.clear();
+            let mut c = Craft::default();
+            c.active = true;
+            c.human = true;
+            c.pos = [x as f32 + 0.5 - dx as f32 * 3.0, y as f32 + 0.5 - dy as f32 * 3.0, 0.0];
+            c.yaw = heading(dx as f32, dy as f32);
+            w.init_craft(&mut c);
+            c.started = true;
+            c.lap = 1;
+            w.crafts.push(c);
+            let input = HumanIn { accel: true, ..Default::default() };
+            for t in 0..80 {
+                let mut inp = input;
+                // wiggle a little, as a player does against a wall
+                inp.left = (t / 6) % 3 == 1;
+                inp.right = (t / 6) % 3 == 2;
+                w.update_craft(0, inp);
+            }
+            let c = &w.crafts[0];
+            let (cx, cy) = (c.pos[0].floor() as i32, c.pos[1].floor() as i32);
+            if w.lvl.column(cx, cy).is_some() && c.pos[2] > w.lvl.terrain_height(c.pos[0], c.pos[1]) + 1.0 {
+                climbs += 1;
+            }
+        }
+        (climbs, cases.len())
+    }
+
+    #[test]
+    fn crafts_do_not_climb_block_walls() {
+        crate::data::files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/resources").into());
+        let mut report = Vec::new();
+        for track in 1..=6 {
+            let (c, n) = wall_climbs(track);
+            report.push(format!("track {track}: {c} of {n}"));
+        }
+        println!("{}", report.join("\n"));
+        assert!(report.iter().all(|r| r.contains(": 0 of")), "{}", report.join("\n"));
     }
 }

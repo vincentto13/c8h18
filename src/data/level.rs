@@ -256,6 +256,16 @@ impl Level {
         }
         base
     }
+    /// Surface for the crafts' hover sensors (spec 05 §3.i, §3.l): the terrain or the top of the
+    /// highest block below height z. Unlike [`floor_below`](Self::floor_below), a block the point
+    /// is inside does not count, so a sensor pushed into a wall can't climb onto it.
+    pub fn surface_below(&self, x: f32, y: f32, z: f32) -> f32 {
+        let base = self.terrain_height(x, y);
+        let Some(col) = self.column(x.floor() as i32, y.floor() as i32) else { return base };
+        let rel = z - base;
+        let top = (0..16).filter(|&k| col.mask & (1 << k) != 0 && (k as f32 + 1.0) <= rel + 0.001).map(|k| k as f32 + 1.0).fold(0.0, f32::max);
+        base + top
+    }
     /// Map collision: inside a solid block or below the terrain.
     pub fn collide(&self, x: f32, y: f32, z: f32) -> bool {
         self.solid_at(x, y, z) || z < self.terrain_height(x, y)
