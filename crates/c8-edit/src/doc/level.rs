@@ -169,6 +169,7 @@ pub struct LevelDoc {
     paste_textures: bool,
     paste_light: bool,
     message: String,
+    test: bool,
 }
 
 impl LevelDoc {
@@ -221,6 +222,7 @@ impl LevelDoc {
             paste_textures: true,
             paste_light: true,
             message: String::new(),
+            test: false,
         })
     }
 
@@ -458,23 +460,6 @@ impl LevelDoc {
     }
 
     /// Save to a temporary file and start the game on it.
-    fn test_in_game(&mut self) {
-        let tmp = std::env::temp_dir().join("c8h18-edit-test.dat");
-        if let Err(e) = self.level.write_file(&tmp) {
-            self.message = format!("cannot write the test level: {e}");
-            return;
-        }
-        let exe_name = if cfg!(windows) { "c8h18.exe" } else { "c8h18" };
-        let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(exe_name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(exe_name));
-        let data = c8_data::files::data_dir();
-        let data = data.canonicalize().unwrap_or(data);
-        let track = (self.look.set + 1).to_string();
-        match std::process::Command::new(&exe).arg(&data).args(["--no-intro", "--race", &track, "--level"]).arg(&tmp).spawn() {
-            Ok(_) => self.message = format!("started the game on track {track}'s textures"),
-            Err(e) => self.message = format!("cannot start {}: {e} (build it with `cargo build --release`)", exe.display()),
-        }
-    }
-
     // ---- drawing ---------------------------------------------------------------------------
 
     fn draw_overlays(&self, p: &egui::Painter, origin: Pos2) {
@@ -664,6 +649,16 @@ impl Document for LevelDoc {
     fn can_redo(&self) -> bool {
         self.history.can_redo()
     }
+    /// The level replaces the one of the track whose textures it is shown with.
+    fn game_files(&self) -> Result<Vec<(String, Vec<u8>)>, String> {
+        Ok(vec![(format!("MAPS/LEVEL0-{}.DAT", self.look.set + 1), self.level.to_bytes()?)])
+    }
+    fn game_args(&self) -> Vec<String> {
+        vec!["--no-intro".into(), "--race".into(), (self.look.set + 1).to_string()]
+    }
+    fn wants_test(&mut self) -> bool {
+        std::mem::take(&mut self.test)
+    }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
         // keyboard: tools, copy / paste, escape
@@ -821,7 +816,7 @@ impl Document for LevelDoc {
     fn side_ui(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Test in game").on_hover_text("save to a temporary file and start the game on it").clicked() {
-                self.test_in_game();
+                self.test = true;
             }
         });
         if !self.message.is_empty() {

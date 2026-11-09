@@ -184,6 +184,7 @@ Safety:
 | 0 | Workspace split, `c8-data` with level writing; byte-identical round-trip test | **done**: game builds and runs unchanged; 6/6 levels round-trip |
 | 1 | Editor skeleton: open/save, 2D map with overlays, pan/zoom, cell inspector, undo/redo framework, preferences (data folder), resource browser and viewers | **done** (first tool: height brush) |
 | 2 | Terrain tools: heights, textures and orientation, light paint/bake; selection copy/paste; texture attributes; "Test in game" (game option `--level`) | **done** |
+| 2b | Resource editors: pixel editor for terrain textures, skies, screens, model texture atlases, billboards, sprite sheets and fonts (PNG import/export, glyph resize, font preview); palette editor; "Test in game" for any edited file via the game option `--override <dir>` | **done** |
 | 3 | Columns and blocks; entities (checkpoints, waypoint chains, walls, start grid, pickups, trucks, cameras, triggers/morphs); regions; validation panel | an original track can be re-routed and still races |
 | 4 | MCP: headless stdio and live HTTP modes, the tool set above, image renders, activity log | Claude Code can build a small track loop through MCP alone |
 | 5 | 3D preview (shared shader); `c8-sim` extraction and in-editor AI test (`ai_sim`) | 3D view matches the game; AI lap report in the editor |

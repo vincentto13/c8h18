@@ -3,10 +3,12 @@
 //!   c8h18-edit [--data <game data folder>] [<file to open>]
 //!
 //! The editor reads the original data files from the game data folder (DATA/, MAPS/, OBJECTS/,
-//! SOUND/), chosen on the first start and remembered. Each opened file is a document; levels have
-//! an editor, other resource kinds get viewers first and editors later (see `docs/editor-plan.md`).
+//! SOUND/), chosen on the first start and remembered. Each opened file is a document: levels,
+//! textures, fonts, sprites, pictures and the palette have editors, other kinds open in a viewer
+//! (see `docs/editor-plan.md`).
 mod app;
 mod doc;
+mod launch;
 mod resources;
 
 use std::path::PathBuf;

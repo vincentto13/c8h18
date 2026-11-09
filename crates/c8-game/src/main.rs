@@ -495,6 +495,11 @@ fn main() {
                 let _ = race::LEVEL_FILE.set(p.into());
             }
             i += 1;
+        } else if l == "--override" {
+            if let Some(p) = args.get(i + 1) {
+                data::files::set_override_dir(Some(p.into()));
+            }
+            i += 1;
         } else if l == "--race" || l == "--demo" {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             opts.race = Some((t, l == "--demo"));

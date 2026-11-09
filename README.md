@@ -41,6 +41,7 @@ Options:
 | `--race N` / `--demo N` | debug: go straight to a race / demo race on track N |
 | `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
+| `--override <dir>` | load data files from `<dir>` (same layout, e.g. `<dir>/DATA/TEXTU0-0.DAT`) in place of the data directory's; used by the editor's Test in game |
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
 
@@ -139,12 +140,29 @@ chargers and start area, grid) and a cell inspector. Tools (keys in brackets):
 | Light (L) | paint brighter / darker (Shift), smooth, or bake from a light direction and the slopes into the selection or the whole map |
 | Select (S) | drag a rectangle; ⌘C copies, ⌘V pastes (click to place) heights, textures and light |
 
-Every stroke is one undo step (⌘Z / ⇧⌘Z). **Test in game** saves to a temporary file and starts
-`c8h18 --race N --level <file>` (the game next to the editor, or on the PATH). Saving writes an
-unpacked level; originals in the data folder are never overwritten (Save asks for a new name).
-Other resource kinds open read-only, with a preview for palettes, terrain textures, skies and
-language files. Pan with the scroll wheel or a right/middle drag, zoom with pinch or Ctrl/⌘ +
-wheel. The plan, including the built-in MCP server, is in `docs/editor-plan.md`.
+Every stroke is one undo step (⌘Z / ⇧⌘Z). Pan with the scroll wheel or a right/middle drag, zoom
+with pinch or Ctrl/⌘ + wheel.
+
+Pictures and fonts open in a pixel editor: terrain textures (256 tiles of 64×64), skies, screens
+(title, backdrops, loading picture, puzzle), model texture atlases (with their texture rectangles
+shown), billboards (TMAPS), sprite sheets and fonts. Frames (textures, glyphs, sprites) are listed
+on the left; fonts label each glyph with its code page 437 character and show a preview text.
+Tools: Pencil (B), Eraser (E, sheets and fonts only: makes pixels transparent), Fill (G), Pick (I,
+or right-click / Alt+click); brush size; flip, rotate, clear, copy/paste frames (⌘C / ⌘V, also
+between files); [ and ] or the arrow keys step through frames. Glyphs and sprites can be resized
+(a glyph's width is its advance) and cropped to their content. Colours come from the game palette;
+OLFNT/OSFNT glyphs are masks (0 = outline, any other value = text colour). **PNG**: export / import
+one frame, or all frames as one grid image to edit in any paint program; imported colours are
+matched to the nearest palette colour. The palette (PALET0-0) has its own editor; the colour tables
+are not recalculated from it.
+
+Saving writes unpacked files (the game reads both; sheets also get their `.TAB`); originals in the
+data folder are never overwritten (Save asks for a new name). **Test in game** (button or ⌘R)
+writes the active file and every other open file with changes into a temporary override folder and
+starts `c8h18 --override <dir>` (the game next to the editor, or on the PATH): textures and
+skies on their track's race, levels on the race of the track set they are shown with, the rest in
+the menus. Colour tables, models, sounds and language files open read-only. The plan, including
+the built-in MCP server, is in `docs/editor-plan.md`.
 
 ## Debug automation
 

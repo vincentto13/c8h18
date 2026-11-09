@@ -123,6 +123,11 @@ impl EditorApp {
                     self.request_close(self.active);
                 }
             });
+            ui.menu_button("Game", |ui| {
+                if ui.add_enabled(!self.docs.is_empty(), egui::Button::new("Test in game").shortcut_text("⌘R")).on_hover_text("Start the game with the open edited files in place of the originals").clicked() {
+                    self.test_in_game();
+                }
+            });
             ui.menu_button("Edit", |ui| {
                 let (u, r) = self.docs.get(self.active).map(|d| (d.can_undo(), d.can_redo())).unwrap_or((false, false));
                 if ui.add_enabled(u, egui::Button::new("Undo").shortcut_text("⌘Z")).clicked() {
@@ -153,9 +158,16 @@ impl EditorApp {
                 d.undo();
             }
         }
+        if sc(cmd, Key::R) && !self.docs.is_empty() {
+            self.test_in_game();
+        }
         if sc(cmd, Key::W) && !self.docs.is_empty() {
             self.request_close(self.active);
         }
+    }
+
+    fn test_in_game(&mut self) {
+        self.status = crate::launch::test_in_game(&self.docs, self.active).unwrap_or_else(|e| e);
     }
 
     fn request_close(&mut self, i: usize) {
@@ -252,7 +264,7 @@ impl eframe::App for EditorApp {
         });
         egui::Panel::left("browser").default_size(240.0).resizable(true).show(ui, |ui| self.browser(ui));
         if !self.docs.is_empty() {
-            egui::Panel::right("inspector").default_size(300.0).resizable(true).show(ui, |ui| {
+            egui::Panel::right("inspector").default_size(300.0).size_range(220.0..=480.0).resizable(true).show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| self.docs[self.active].side_ui(ui));
             });
         }
@@ -285,6 +297,9 @@ impl eframe::App for EditorApp {
                 d.ui(ui);
             }
         });
+        if self.docs.get_mut(self.active).is_some_and(|d| d.wants_test()) {
+            self.test_in_game();
+        }
         if let Some(i) = self.confirm_close {
             let title = self.docs.get(i).map(|d| d.title()).unwrap_or_default();
             egui::Modal::new(egui::Id::unique("confirm-close")).show(&ctx, |ui| {

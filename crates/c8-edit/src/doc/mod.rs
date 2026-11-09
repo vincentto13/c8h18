@@ -1,7 +1,10 @@
 //! Documents: one per opened file. Every resource kind implements [`Document`]; the app only
 //! deals with this trait, so adding an editor for textures, fonts etc. means adding a type here.
 pub mod history;
+pub mod image;
 pub mod level;
+pub mod palette;
+pub mod pixels;
 pub mod viewer;
 
 use crate::resources::Kind;
@@ -32,12 +35,27 @@ pub trait Document {
     fn can_redo(&self) -> bool {
         false
     }
+    /// Files to put in the game's override folder for "Test in game": (path relative to the data
+    /// folder, contents). The game loads them instead of the originals.
+    fn game_files(&self) -> Result<Vec<(String, Vec<u8>)>, String> {
+        Ok(Vec::new())
+    }
+    /// Game arguments that show this document's content (e.g. a race on its track).
+    fn game_args(&self) -> Vec<String> {
+        vec!["--no-intro".into()]
+    }
+    /// Polled each frame: did the user press the document's "Test in game" button?
+    fn wants_test(&mut self) -> bool {
+        false
+    }
 }
 
 /// Open a file as the document type for its kind.
 pub fn open(path: PathBuf, kind: Kind, rel: String) -> Result<Box<dyn Document>, String> {
     Ok(match kind {
         Kind::Level => Box::new(level::LevelDoc::open(path, rel)?),
+        Kind::Palette => Box::new(palette::PaletteDoc::open(path, rel)?),
+        Kind::TerrainTextures | Kind::Sky | Kind::Image | Kind::ModelTextures | Kind::Sprites | Kind::Font | Kind::Billboards => Box::new(image::ImageDoc::open(path, kind, rel)?),
         _ => Box::new(viewer::Viewer::open(path, kind, rel)?),
     })
 }

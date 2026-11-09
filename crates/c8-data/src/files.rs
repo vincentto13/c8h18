@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 
 static DATA_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
+static OVERRIDE_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
 
 /// Set the data directory (default `resources`). Can be changed later, e.g. when the editor opens
 /// another game folder.
@@ -14,9 +15,21 @@ pub fn data_dir() -> PathBuf {
     DATA_DIR.read().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| PathBuf::from("resources"))
 }
 
-/// Resolve a relative path like "data/palet0-0.dat" case-insensitively.
+/// Port addition: a folder whose files take precedence over the data directory's (same layout,
+/// e.g. `<dir>/DATA/TEXTU0-0.DAT`). The editor uses it to try edited files in the game.
+pub fn set_override_dir(p: Option<PathBuf>) {
+    *OVERRIDE_DIR.write().unwrap_or_else(|e| e.into_inner()) = p;
+}
+
+/// Resolve a relative path like "data/palet0-0.dat" case-insensitively, in the override folder
+/// first and then in the data directory.
 pub fn resolve(rel: &str) -> Option<PathBuf> {
-    let mut cur = data_dir();
+    let over = OVERRIDE_DIR.read().unwrap_or_else(|e| e.into_inner()).clone();
+    over.and_then(|o| resolve_in(o, rel)).or_else(|| resolve_in(data_dir(), rel))
+}
+
+fn resolve_in(root: PathBuf, rel: &str) -> Option<PathBuf> {
+    let mut cur = root;
     for part in rel.split('/') {
         let direct = cur.join(part);
         if direct.exists() {
@@ -66,4 +79,22 @@ pub fn u32le(d: &[u8], o: usize) -> u32 {
 }
 pub fn i32le(d: &[u8], o: usize) -> i32 {
     i32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn override_dir_wins() {
+        let d = std::env::temp_dir().join(format!("c8-override-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("DATA")).unwrap();
+        std::fs::write(d.join("DATA/ZZTEST.DAT"), b"over").unwrap();
+        set_override_dir(Some(d.clone()));
+        // only files present in the override folder come from it
+        assert_eq!(read_raw("data/zztest.dat").unwrap(), b"over");
+        set_override_dir(None);
+        assert!(read_raw("data/zztest.dat").is_err());
+        let _ = std::fs::remove_dir_all(d);
+    }
 }
