@@ -1,8 +1,16 @@
-//! Level document: a top-down map of a `LEVEL0-N.DAT` with overlays, a cell inspector and the
-//! terrain tools (height, texture, light, selection with copy/paste), texture attributes and
-//! "Test in game". Further tools follow docs/editor-plan.md.
+//! Level document: a top-down map of a `LEVEL0-N.DAT` with overlays, a cell inspector, the
+//! terrain tools (height, texture, light, selection with copy/paste), texture attributes, the
+//! Objects tool (entities and regions), the Blocks tool (columns and blocks), track checks with
+//! an AI test, and "Test in game".
+mod blocks;
+mod check;
+mod edit;
+mod objects;
+
 use super::history::{Command, History};
 use super::Document;
+use blocks::ColMode;
+use objects::{Drag, Layers, ObjMode, Sel};
 use crate::resources::Kind;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use c8_data::images::{load_terrain_textures, ColourTable, Palette};
@@ -28,6 +36,8 @@ enum Tool {
     Texture,
     Light,
     Select,
+    Objects,
+    Blocks,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -170,6 +180,27 @@ pub struct LevelDoc {
     paste_light: bool,
     message: String,
     test: bool,
+    /// structural edit in progress (see edit.rs)
+    pending: Option<edit::Pending>,
+    /// pointer in map coordinates (cells, fractional)
+    hover_f: Option<Vec2>,
+    view_size: Vec2,
+    obj_sel: Option<Sel>,
+    obj_mode: ObjMode,
+    drag: Option<Drag>,
+    layers: Layers,
+    add_template: usize,
+    all_fields: bool,
+    entity_filter: String,
+    col_mode: ColMode,
+    col_sel: Option<usize>,
+    blk_sel: Option<usize>,
+    /// face being given a texture: 0..5 block faces, 6 the column floor
+    face_sel: usize,
+    /// column level of the selected block
+    lvl_sel: usize,
+    ai: Option<check::AiState>,
+    ai_ticks: u32,
 }
 
 impl LevelDoc {
@@ -178,7 +209,7 @@ impl LevelDoc {
         // LEVEL0-N uses texture set and colour table N-1
         let name = path.file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         let set = name.strip_prefix("level0-").and_then(|n| n.parse::<usize>().ok()).map(|n| n.saturating_sub(1)).unwrap_or(0).min(5);
-        Ok(LevelDoc {
+        let mut d = LevelDoc {
             path,
             rel,
             level,
@@ -197,6 +228,8 @@ impl LevelDoc {
                 Ok("texture") => Tool::Texture,
                 Ok("light") => Tool::Light,
                 Ok("select") => Tool::Select,
+                Ok("objects") => Tool::Objects,
+                Ok("blocks") => Tool::Blocks,
                 _ => Tool::Inspect,
             },
             brush_radius: 2,
@@ -223,7 +256,34 @@ impl LevelDoc {
             paste_light: true,
             message: String::new(),
             test: false,
-        })
+            pending: None,
+            hover_f: None,
+            view_size: Vec2::new(800.0, 600.0),
+            obj_sel: None,
+            obj_mode: ObjMode::Select,
+            drag: None,
+            layers: Layers::default(),
+            add_template: 0,
+            all_fields: false,
+            entity_filter: String::new(),
+            col_mode: ColMode::Select,
+            col_sel: None,
+            blk_sel: None,
+            face_sel: 0,
+            lvl_sel: 0,
+            ai: None,
+            ai_ticks: 4000,
+        };
+        // debug (screenshots): HIEDIT_ENTITY=<record> / HIEDIT_COLUMN=<id> start with a selection
+        let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
+        if let Some(e) = num("HIEDIT_ENTITY") {
+            d.obj_sel = Some(Sel::Entity(e));
+        }
+        if let Some(c) = num("HIEDIT_COLUMN") {
+            d.col_sel = Some(c);
+            d.blk_sel = d.level.columns.get(c).and_then(|c| c.blocks.iter().find(|&&b| b > 0)).map(|&b| b as usize);
+        }
+        Ok(d)
     }
 
     fn render(&self) -> egui::ColorImage {
@@ -487,34 +547,89 @@ impl LevelDoc {
                     _ => Color32::WHITE,
                 };
                 let rect = Rect::from_min_max(self.to_screen(origin, r.cx - r.hw, r.cy - r.hh), self.to_screen(origin, r.cx + r.hw, r.cy + r.hh));
-                p.rect_stroke(rect, 0.0, Stroke::new(2.0, c), egui::StrokeKind::Inside);
+                let selected = self.obj_sel == Some(Sel::Region(r.slot));
+                p.rect_stroke(rect, 0.0, Stroke::new(if selected { 3.5 } else { 2.0 }, c), egui::StrokeKind::Inside);
+                if selected {
+                    for k in [rect.left_top(), rect.right_top(), rect.right_bottom(), rect.left_bottom()] {
+                        p.rect_filled(Rect::from_center_size(k, Vec2::splat(7.0)), 1.0, Color32::WHITE);
+                    }
+                }
+                if z >= 4.0 {
+                    p.text(rect.left_top() + Vec2::new(3.0, 2.0), egui::Align2::LEFT_TOP, objects::region_name(r.kind), egui::FontId::proportional(11.0), c);
+                }
             }
         }
         if self.show_entities {
             let pos = |i: usize| lvl.entities.iter().find(|e| e.index == i).map(|e| (e.x as f32 + 0.5, e.y as f32 + 0.5));
-            for e in &lvl.entities {
+            for e in lvl.entities.iter().filter(|e| self.layers.shows(e)) {
                 let s = self.to_screen(origin, e.x as f32 + 0.5, e.y as f32 + 0.5);
+                // entities of later groups appear only when a trigger activates them
+                let a = if e.group == 1 { 255 } else { 130 };
+                let rgb = |r, g, b| Color32::from_rgba_unmultiplied(r, g, b, a);
                 match (e.kind, e.sub) {
                     (9, sub) => {
                         if let Some((lx, ly)) = pos(e.link as usize) {
-                            let col = if sub == 0 { Color32::from_rgb(255, 60, 60) } else if sub == 6 { Color32::from_rgb(255, 0, 255) } else { Color32::from_rgb(0, 230, 230) };
+                            let col = if sub == 0 { rgb(255, 60, 60) } else if sub == 6 { rgb(255, 0, 255) } else { rgb(0, 230, 230) };
                             let t = self.to_screen(origin, lx, ly);
                             p.line_segment([s, t], Stroke::new(if sub == 0 { 2.0 } else { 1.5 }, col));
                             if sub != 0 {
                                 p.circle_filled(t, 2.0, col);
                             }
                         }
+                        if self.tool == Tool::Objects && z >= 6.0 {
+                            p.circle_filled(s, 2.0, if sub == 0 { rgb(255, 120, 120) } else { rgb(150, 255, 255) });
+                        }
                     }
                     (1, _) => {
-                        let r = cell_rect(e.x as f32, e.y as f32, e.w as f32 + 1.0, e.h as f32 + 1.0);
-                        p.rect_stroke(r, 0.0, Stroke::new(2.0, Color32::YELLOW), egui::StrokeKind::Inside);
-                        p.text(r.center(), egui::Align2::CENTER_CENTER, e.value.to_string(), egui::FontId::proportional(12.0), Color32::YELLOW);
+                        // the port's checkpoint box starts at the entity cell's centre
+                        let r = cell_rect(e.x as f32 + 0.5, e.y as f32 + 0.5, e.w as f32 + 1.0, e.h as f32 + 1.0);
+                        p.rect_stroke(r, 0.0, Stroke::new(2.0, rgb(255, 255, 0)), egui::StrokeKind::Inside);
+                        p.text(r.center(), egui::Align2::CENTER_CENTER, e.value.to_string(), egui::FontId::proportional(12.0), rgb(255, 255, 0));
                     }
-                    (5, _) => { p.circle_filled(s, (z * 0.35).max(3.0), Color32::from_rgb(60, 255, 60)); }
-                    (10, _) => { p.circle_filled(s, (z * 0.45).max(4.0), Color32::from_rgb(255, 150, 0)); }
-                    (8, _) => { p.circle_stroke(s, (z * 0.4).max(3.0), Stroke::new(1.5, Color32::from_rgb(255, 80, 255))); }
-                    (3, 3) => { p.circle_stroke(s, 2.5, Stroke::new(1.0, Color32::LIGHT_GRAY)); }
-                    _ => { p.circle_filled(s, 2.0, Color32::from_rgb(200, 200, 200)); }
+                    (5, _) => {
+                        p.circle_filled(s, (z * 0.35).max(3.0), rgb(60, 255, 60));
+                    }
+                    (10, _) => {
+                        p.circle_filled(s, (z * 0.45).max(4.0), rgb(255, 150, 0));
+                    }
+                    (8, sub) => {
+                        p.circle_stroke(s, (z * 0.4).max(3.0), Stroke::new(1.5, rgb(255, 80, 255)));
+                        if sub == 0 && self.obj_sel == Some(Sel::Entity(e.index)) {
+                            let r = Rect::from_min_max(self.to_screen(origin, e.x as f32 + 0.5 - e.w as f32, e.y as f32 + 0.5 - e.h as f32), self.to_screen(origin, e.x as f32 + 0.5 + e.w as f32, e.y as f32 + 0.5 + e.h as f32));
+                            p.rect_stroke(r, 0.0, Stroke::new(1.0, rgb(255, 80, 255)), egui::StrokeKind::Middle);
+                        }
+                    }
+                    (2, 15..=19) => {
+                        let r = cell_rect(e.x as f32, e.y as f32, e.w as f32 + 1.0, e.h as f32 + 1.0);
+                        p.rect_stroke(r, 0.0, Stroke::new(1.0, rgb(255, 160, 60)), egui::StrokeKind::Inside);
+                        if let Some((lx, ly)) = pos(e.link as usize) {
+                            let r2 = cell_rect(lx - 0.5, ly - 0.5, e.w as f32 + 1.0, e.h as f32 + 1.0);
+                            p.rect_stroke(r2, 0.0, Stroke::new(1.0, rgb(255, 200, 120)), egui::StrokeKind::Inside);
+                            p.line_segment([r.center(), r2.center()], Stroke::new(1.0, rgb(255, 160, 60)));
+                        }
+                    }
+                    (3, 3) => {
+                        p.circle_stroke(s, 2.5, Stroke::new(1.0, Color32::LIGHT_GRAY));
+                    }
+                    _ => {
+                        p.circle_filled(s, 2.0, rgb(200, 200, 200));
+                    }
+                }
+            }
+            // the selected entity and its link
+            if let Some(Sel::Entity(i)) = self.obj_sel {
+                if let Some(e) = lvl.entities.iter().find(|e| e.index == i) {
+                    let s = self.to_screen(origin, e.x as f32 + 0.5, e.y as f32 + 0.5);
+                    p.circle_stroke(s, (z * 0.6).max(6.0), Stroke::new(2.0, Color32::WHITE));
+                    if let Some((lx, ly)) = pos(e.link as usize) {
+                        p.line_segment([s, self.to_screen(origin, lx, ly)], Stroke::new(3.0, Color32::from_rgba_unmultiplied(255, 255, 255, 160)));
+                    }
+                }
+            }
+            // the chain being drawn
+            if let (ObjMode::Chain(_, Some(last)), Some(h)) = (self.obj_mode, self.hover) {
+                if let Some((lx, ly)) = pos(last) {
+                    p.line_segment([self.to_screen(origin, lx, ly), self.to_screen(origin, h.0 as f32 + 0.5, h.1 as f32 + 0.5)], Stroke::new(1.5, Color32::from_rgba_unmultiplied(255, 255, 255, 180)));
                 }
             }
         }
@@ -546,20 +661,21 @@ impl LevelDoc {
         }
     }
 
-    fn texture_palette(&mut self, ui: &mut egui::Ui) {
+    /// The level's 256 textures; returns the clicked one.
+    fn texture_picker(&mut self, ui: &mut egui::Ui, selected: u8) -> Option<u8> {
         let atlas = self.look.atlas(ui.ctx());
         // 8 per row, sized to the panel (buttons add a few pixels of frame)
         let cols = 8;
         let thumb = ((ui.available_width() - 20.0) / cols as f32 - 8.0).clamp(16.0, THUMB);
+        let mut clicked = None;
         egui::ScrollArea::vertical().id_salt("texpal").max_height(260.0).show(ui, |ui| {
             egui::Grid::new("texgrid").spacing([2.0, 2.0]).show(ui, |ui| {
                 for t in 0..256usize {
                     let uv = Rect::from_min_size(Pos2::new((t % 16) as f32 / 16.0, (t / 16) as f32 / 16.0), Vec2::splat(1.0 / 16.0));
                     let img = egui::Image::new((atlas, Vec2::splat(thumb))).uv(uv);
-                    let selected = t == self.paint_tex as usize;
-                    let resp = ui.add(egui::Button::image(img).selected(selected)).on_hover_text(format!("texture {t}, attributes {:#06x}", self.level.tex_attr[t]));
+                    let resp = ui.add(egui::Button::image(img).selected(t == selected as usize)).on_hover_text(format!("texture {t}, attributes {:#06x}", self.level.tex_attr[t]));
                     if resp.clicked() {
-                        self.paint_tex = t as u8;
+                        clicked = Some(t as u8);
                     }
                     if (t + 1) % cols == 0 {
                         ui.end_row();
@@ -567,6 +683,7 @@ impl LevelDoc {
                 }
             });
         });
+        clicked
     }
 }
 
@@ -634,11 +751,14 @@ impl Document for LevelDoc {
         Ok(())
     }
     fn undo(&mut self) {
+        self.finish_edit();
+        self.end_stroke("edit");
         self.history.undo(&mut self.level);
         self.level.update_extent();
         self.image_dirty = true;
     }
     fn redo(&mut self) {
+        self.finish_edit();
         self.history.redo(&mut self.level);
         self.level.update_extent();
         self.image_dirty = true;
@@ -661,31 +781,48 @@ impl Document for LevelDoc {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        // keyboard: tools, copy / paste, escape
+        // keyboard: tools, copy / paste, escape, delete
         if !ui.ctx().egui_wants_keyboard_input() {
-            let (keys, copy, paste) = ui.input(|i| {
+            let (keys, copy, paste, delete, dup) = ui.input(|i| {
                 let k = |key| i.key_pressed(key) && i.modifiers.is_none();
                 (
-                    [k(egui::Key::I), k(egui::Key::H), k(egui::Key::T), k(egui::Key::L), k(egui::Key::S), k(egui::Key::R), k(egui::Key::F), i.key_pressed(egui::Key::Escape)],
+                    [k(egui::Key::I), k(egui::Key::H), k(egui::Key::T), k(egui::Key::L), k(egui::Key::S), k(egui::Key::O), k(egui::Key::B), k(egui::Key::R), k(egui::Key::F), i.key_pressed(egui::Key::Escape), k(egui::Key::A)],
                     i.events.iter().any(|e| matches!(e, egui::Event::Copy)),
                     i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))),
+                    k(egui::Key::Delete) || k(egui::Key::Backspace),
+                    i.modifiers.command && i.key_pressed(egui::Key::D),
                 )
             });
-            let tools = [Tool::Inspect, Tool::Height, Tool::Texture, Tool::Light, Tool::Select];
+            let tools = [Tool::Inspect, Tool::Height, Tool::Texture, Tool::Light, Tool::Select, Tool::Objects, Tool::Blocks];
             for (k, t) in keys.iter().zip(tools) {
-                if *k {
+                if *k && self.tool != t {
+                    self.cancel_mode();
                     self.tool = t;
                 }
             }
-            if keys[5] {
+            if keys[7] {
                 self.paint_orient = orient_rotate(self.paint_orient);
             }
-            if keys[6] {
+            if keys[8] {
                 self.paint_orient = orient_flip(self.paint_orient);
             }
-            if keys[7] {
-                self.pasting = false;
-                self.selection = None;
+            if keys[9] {
+                if self.obj_mode != ObjMode::Select {
+                    self.cancel_mode();
+                } else {
+                    self.pasting = false;
+                    self.selection = None;
+                    self.obj_sel = None;
+                }
+            }
+            if keys[10] && self.tool == Tool::Objects {
+                self.start_adding();
+            }
+            if delete && self.tool == Tool::Objects {
+                self.delete_selected();
+            }
+            if dup && self.tool == Tool::Objects {
+                self.duplicate_selected();
             }
             if copy {
                 self.copy();
@@ -705,6 +842,7 @@ impl Document for LevelDoc {
         }
         let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = resp.rect;
+        self.view_size = rect.size();
         painter.rect_filled(rect, 0.0, Color32::from_gray(24));
         if !self.fitted {
             let (w, h) = ((self.level.max_x.max(16) + 4) as f32, (self.level.max_y.max(16) + 4) as f32);
@@ -734,12 +872,10 @@ impl Document for LevelDoc {
         if let Some(t) = &self.image {
             painter.image(t.id(), map, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         }
-        self.hover = resp
-            .hover_pos()
-            .or_else(|| resp.interact_pointer_pos())
-            .map(|p| (p - origin + self.pan) / self.zoom)
-            .filter(|c| c.x >= 0.0 && c.y >= 0.0 && c.x < MAP_W as f32 && c.y < MAP_H as f32)
-            .map(|c| (c.x as i32, c.y as i32));
+        let to_map = |p: Pos2| (p - origin + self.pan) / self.zoom;
+        self.hover_f = resp.hover_pos().or_else(|| resp.interact_pointer_pos()).map(to_map).filter(|c| c.x >= 0.0 && c.y >= 0.0 && c.x < MAP_W as f32 && c.y < MAP_H as f32);
+        self.hover = self.hover_f.map(|c| (c.x as i32, c.y as i32));
+        let press = ui.input(|i| i.pointer.press_origin()).map(to_map);
 
         // tools (primary button)
         let (primary_down, mods) = ui.input(|i| (i.pointer.primary_down(), i.modifiers));
@@ -793,6 +929,8 @@ impl Document for LevelDoc {
                         self.end_stroke(if self.light_smooth { "light smooth" } else { "light paint" });
                     }
                 }
+                Tool::Objects => self.objects_input(&resp, press),
+                Tool::Blocks => self.blocks_input(&resp, down, mods.alt),
                 Tool::Select => {
                     if resp.drag_started_by(egui::PointerButton::Primary) {
                         self.sel_start = self.hover;
@@ -811,6 +949,11 @@ impl Document for LevelDoc {
             }
         }
         self.draw_overlays(&painter, origin);
+        if self.tool == Tool::Blocks {
+            self.draw_column_selection(&painter, origin);
+        }
+        self.draw_ai_marks(&painter, origin);
+        self.settle_edit(ui.ctx());
     }
 
     fn side_ui(&mut self, ui: &mut egui::Ui) {
@@ -856,7 +999,12 @@ impl Document for LevelDoc {
             ui.selectable_value(&mut self.tool, Tool::Texture, "Texture (T)");
             ui.selectable_value(&mut self.tool, Tool::Light, "Light (L)");
             ui.selectable_value(&mut self.tool, Tool::Select, "Select (S)");
+            ui.selectable_value(&mut self.tool, Tool::Objects, "Objects (O)");
+            ui.selectable_value(&mut self.tool, Tool::Blocks, "Blocks (B)");
         });
+        if self.tool != Tool::Objects && self.obj_mode != ObjMode::Select {
+            self.cancel_mode();
+        }
         let brush = |ui: &mut egui::Ui, r: &mut i32| {
             ui.add(egui::Slider::new(r, 0..=12).text("radius (cells)"));
         };
@@ -864,6 +1012,8 @@ impl Document for LevelDoc {
             Tool::Inspect => {
                 ui.label("Point at the map to see a cell.");
             }
+            Tool::Objects => self.objects_panel(ui),
+            Tool::Blocks => self.blocks_panel(ui),
             Tool::Height => {
                 brush(ui, &mut self.brush_radius);
                 ui.add(egui::Slider::new(&mut self.brush_step, 0.05..=2.0).text("step (cells)"));
@@ -901,7 +1051,9 @@ impl Document for LevelDoc {
                 mesh.indices.extend([0, 1, 2, 0, 2, 3]);
                 ui.painter().add(egui::Shape::mesh(mesh));
                 ui.label("Alt+click picks from the map; cells with block columns keep their column's floor.");
-                self.texture_palette(ui);
+                if let Some(t) = self.texture_picker(ui, self.paint_tex) {
+                    self.paint_tex = t;
+                }
                 let t = self.paint_tex as usize;
                 let mut attr = self.level.tex_attr[t];
                 ui.horizontal(|ui| {
@@ -989,6 +1141,8 @@ impl Document for LevelDoc {
         }
 
         ui.separator();
+        self.check_panel(ui);
+        ui.separator();
         ui.heading("Level");
         let used: std::collections::HashSet<i16> = self.level.cells.iter().filter(|c| c.tex < 0).map(|c| c.tex).collect();
         ui.label(format!("{} entities, {} regions, {} columns in use", self.level.entities.len(), self.level.regions.len(), used.len()));
@@ -997,6 +1151,7 @@ impl Document for LevelDoc {
                 ui.label(l);
             }
         });
+        self.settle_edit(ui.ctx());
     }
 }
 
@@ -1059,5 +1214,63 @@ mod tests {
         let back = Level::read_file(&tmp).unwrap();
         assert!(back.cells == d.level.cells);
         let _ = std::fs::remove_file(tmp);
+    }
+
+    /// Entities, regions, columns and blocks: edits, undo, save and reload.
+    #[test]
+    fn structure_edits() {
+        let data = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources"));
+        c8_data::files::set_data_dir(data);
+        let Some(path) = c8_data::files::resolve("maps/level0-2.dat") else { return };
+        let mut d = LevelDoc::open(path, "LEVEL0-2.DAT".into()).unwrap();
+        let n0 = d.level.entities.len();
+        // a pickup and a three-point waypoint chain
+        d.edit("add", |l| {
+            let i = l.free_entity_index().unwrap();
+            l.entities.push(c8_data::level::Entity { index: i, kind: 5, sub: 11, group: 1, x: 30, y: 30, ..Default::default() });
+        });
+        d.begin_edit("chain");
+        let a = d.add_entity(9, 1, 40, 40).unwrap();
+        let b = d.add_entity(9, 1, 44, 40).unwrap();
+        d.entity_mut(a).unwrap().link = b as u16;
+        d.finish_edit();
+        assert_eq!(d.level.entities.len(), n0 + 3);
+        assert_eq!(d.history.labels().count(), 2);
+        // delete b: a's link is cleared in the same step
+        d.obj_sel = Some(Sel::Entity(b));
+        d.delete_selected();
+        assert_eq!(d.entity(a).unwrap().link, 0);
+        d.undo();
+        assert_eq!(d.entity(a).unwrap().link, b as u16);
+        // a region and a column
+        let slot = d.level.free_region_slot().unwrap();
+        d.edit("region", |l| l.regions.push(c8_data::level::Region { slot, kind: 2, cx: 50.5, cy: 50.5, hw: 1.5, hh: 1.5 }));
+        d.new_column(None);
+        let col = d.col_sel.unwrap();
+        d.brush_radius = 0;
+        d.hover = Some((60, 60));
+        let i = 60 * MAP_W + 60;
+        d.edit_cell(i, |c| c.tex = -(col as i16));
+        d.end_stroke("paint column");
+        assert_eq!(d.level.cells[i].tex, -(col as i16));
+        // checks still pass for errors on an edited original; save and reload
+        let tmp = std::env::temp_dir().join(format!("c8-edit-structure-{}.dat", std::process::id()));
+        d.save_to(&tmp).unwrap();
+        let back = Level::read_file(&tmp).unwrap();
+        let sorted = |v: &[c8_data::level::Entity]| {
+            let mut v = v.to_vec();
+            v.sort_by_key(|e| e.index);
+            v
+        };
+        assert_eq!(sorted(&back.entities), sorted(&d.level.entities));
+        assert_eq!(back.regions.len(), d.level.regions.len());
+        assert_eq!(back.columns[col], d.level.columns[col]);
+        assert_eq!(back.cells[i].tex, -(col as i16));
+        let _ = std::fs::remove_file(tmp);
+        // undo everything
+        while d.can_undo() {
+            d.undo();
+        }
+        assert_eq!(d.level.entities.len(), n0);
     }
 }

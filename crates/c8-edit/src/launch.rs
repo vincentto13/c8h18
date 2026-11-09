@@ -7,7 +7,7 @@ fn override_dir() -> PathBuf {
     std::env::temp_dir().join("c8h18-edit-override")
 }
 
-fn game_exe() -> PathBuf {
+pub(crate) fn game_exe() -> PathBuf {
     let name = if cfg!(windows) { "c8h18.exe" } else { "c8h18" };
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(name))
 }

@@ -47,21 +47,21 @@ pub struct Cell {
     pub orient: u8,
 }
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Column {
     pub mask: u16,
     pub floor_tex: i16,
     pub blocks: [i16; 8],
 }
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Block {
     /// N, E, S, W, top, bottom
     pub tex: [u8; 6],
     pub orient: [u8; 6],
 }
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Entity {
     /// record number 1..3999; other entities refer to it through `link`
     pub index: usize,
@@ -78,7 +78,7 @@ pub struct Entity {
     pub h: u16,
 }
 
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Region {
     /// thing record number (999 downwards)
     pub slot: usize,

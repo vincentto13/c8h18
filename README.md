@@ -139,6 +139,16 @@ chargers and start area, grid) and a cell inspector. Tools (keys in brackets):
 | Texture (T) | paint or flood-fill with a texture from the level's set, in any orientation (R rotates, F mirrors); Alt+click picks from the map; edit the texture's attributes (e.g. the "track" bit) |
 | Light (L) | paint brighter / darker (Shift), smooth, or bake from a light direction and the slopes into the selection or the whole map |
 | Select (S) | drag a rectangle; ⌘C copies, ⌘V pastes (click to place) heights, textures and light |
+| Objects (O) | entities and regions: click to select, drag to move (regions: drag a corner to resize); the inspector names every type and sub-type and labels the fields by their meaning (link, order, group, target group, extent); Add places pickups, trucks, checkpoints, triggers, cameras, effects, or draws wall and waypoint chains point by point (click an existing point to join it); Delete removes (links to it are cleared), Cmd+D duplicates; layers hide kinds of entities; a searchable list of all entities |
+| Blocks (B) | select a block column on the map, paint it on cells or erase columns; edit the column (floor texture, which of the 8 levels are solid, the block on each) and the block (texture and orientation of its six faces, picked from the texture set); copy a column or block before changing it when other cells share it |
+
+**Check** lists what would break the track in the game, each item linked to its place on the map:
+missing start/finish checkpoint or gaps in the checkpoint order, no start area or too few start
+tiles, missing chargers, links to missing entities, waypoints that lead nowhere or more than the
+game's 200 waypoint positions, groups no trigger activates, columns with solid levels but no
+block. **Run AI test** races the 8 computer players on the edited level in the game's headless
+simulation (`c8h18 --sim`) and reports the laps each completed and where any got stuck for 15
+seconds or more (marked on the map).
 
 Every stroke is one undo step (⌘Z / ⇧⌘Z). Pan with the scroll wheel or a right/middle drag, zoom
 with pinch or Ctrl/⌘ + wheel.
@@ -170,4 +180,4 @@ the built-in MCP server, is in `docs/editor-plan.md`.
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
-30 frames and quits; `HIEDIT_TOOL=height|texture|light|select` starts with that tool.
+30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected.
