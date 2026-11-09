@@ -8,7 +8,7 @@ pub mod puzzle;
 pub mod render;
 pub mod sim;
 pub mod sound;
-pub mod terrain;
+pub use c8_render::terrain;
 pub mod track;
 pub mod types;
 pub mod weapons;

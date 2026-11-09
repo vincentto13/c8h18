@@ -1261,9 +1261,11 @@ dependencies = [
 name = "c8-edit"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "eframe",
  "env_logger",
  "c8-data",
+ "c8-render",
  "log",
  "png",
  "rfd",
@@ -1279,12 +1281,21 @@ dependencies = [
  "gilrs",
  "glam",
  "c8-data",
+ "c8-render",
  "log",
  "oplon",
  "png",
  "pollster",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "c8-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "c8-data",
 ]
 
 [[package]]

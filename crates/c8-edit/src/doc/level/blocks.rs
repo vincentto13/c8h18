@@ -215,7 +215,7 @@ impl LevelDoc {
         if c != orig {
             self.begin_edit(&format!("edit column {id}"));
             self.level.columns[id] = c;
-            self.image_dirty = true;
+            self.touch();
         }
         if let Some((k, b)) = select_block {
             self.blk_sel = Some(b);
@@ -253,6 +253,7 @@ impl LevelDoc {
         if blk != orig {
             self.begin_edit(&format!("edit block {b}"));
             self.level.blocks[b] = blk;
+            self.touch();
         }
         if let Some(col) = self.col_sel {
             if users > 1 && ui.button("Copy block for this column level").on_hover_text(format!("a new block like this one on level {} of column {col} only", self.lvl_sel)).clicked() {

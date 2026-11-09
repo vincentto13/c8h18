@@ -8,6 +8,7 @@
 //! (see `docs/editor-plan.md`).
 mod app;
 mod doc;
+mod gpu;
 mod launch;
 mod resources;
 

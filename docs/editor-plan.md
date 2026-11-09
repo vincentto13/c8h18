@@ -187,7 +187,7 @@ Safety:
 | 2b | Resource editors: pixel editor for terrain textures, skies, screens, model texture atlases, billboards, sprite sheets and fonts (PNG import/export, glyph resize, font preview); palette editor; "Test in game" for any edited file via the game option `--override <dir>` | **done** |
 | 3 | Columns and blocks; entities (checkpoints, waypoint chains, walls, start grid, pickups, trucks, cameras, triggers/morphs); regions; validation panel; AI test through the game's headless sim | **done** (AI test via `c8h18 --override <dir> --sim`, so the `c8-sim` extraction of phase 5 is no longer needed for it) |
 | 4 | MCP: headless stdio and live HTTP modes, the tool set above, image renders, activity log | Claude Code can build a small track loop through MCP alone |
-| 5 | 3D preview (shared shader); `c8-sim` extraction and in-editor AI test (`ai_sim`) | 3D view matches the game; AI lap report in the editor |
+| 5 | 3D preview (shared mesh code in `c8-render`, exact light-table colours, fly camera, entity lines) | **done**; the in-editor AI test moved to phase 3 (via `--sim`). Models and billboards in the preview are still open |
 | 6 | Custom tracks in the game menus; minimap generation; packaging for macOS/Linux/Windows | an edited track is selectable in the game on all three systems |
 
 Phases 1–4 give a usable editor with MCP. Phase 5 is the most work, because of the sim extraction.

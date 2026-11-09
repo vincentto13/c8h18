@@ -80,7 +80,7 @@ impl LevelDoc {
         c.revert(&mut self.level);
         self.history.run(c, &mut self.level);
         self.level.update_extent();
-        self.image_dirty = true;
+        self.touch();
     }
 
     /// One complete edit.

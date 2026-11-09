@@ -6,11 +6,13 @@ mod blocks;
 mod check;
 mod edit;
 mod objects;
+mod preview;
 
 use super::history::{Command, History};
 use super::Document;
 use blocks::ColMode;
 use objects::{Drag, Layers, ObjMode, Sel};
+use preview::{Preview, ViewMode};
 use crate::resources::Kind;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use c8_data::images::{load_terrain_textures, ColourTable, Palette};
@@ -201,6 +203,8 @@ pub struct LevelDoc {
     lvl_sel: usize,
     ai: Option<check::AiState>,
     ai_ticks: u32,
+    view_mode: ViewMode,
+    preview: Preview,
 }
 
 impl LevelDoc {
@@ -273,6 +277,12 @@ impl LevelDoc {
             lvl_sel: 0,
             ai: None,
             ai_ticks: 4000,
+            view_mode: match std::env::var("HIEDIT_VIEW").as_deref() {
+                Ok("3d") => ViewMode::ThreeD,
+                Ok("split") => ViewMode::Split,
+                _ => ViewMode::Map,
+            },
+            preview: Preview::default(),
         };
         // debug (screenshots): HIEDIT_ENTITY=<record> / HIEDIT_COLUMN=<id> start with a selection
         let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok());
@@ -324,6 +334,13 @@ impl LevelDoc {
         egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba)
     }
 
+    /// The level changed: redraw the map and rebuild the 3D mesh.
+    fn touch(&mut self) {
+        self.image_dirty = true;
+        self.preview.mesh_dirty = true;
+        self.preview.lines_dirty = true;
+    }
+
     fn to_screen(&self, origin: Pos2, x: f32, y: f32) -> Pos2 {
         origin + Vec2::new(x, y) * self.zoom - self.pan
     }
@@ -344,7 +361,7 @@ impl LevelDoc {
             Some(c) => c.2 = new,
             None => st.changes.push((i, old, new)),
         }
-        self.image_dirty = true;
+        self.touch();
     }
 
     /// Finish the stroke: it becomes one undo step.
@@ -755,13 +772,13 @@ impl Document for LevelDoc {
         self.end_stroke("edit");
         self.history.undo(&mut self.level);
         self.level.update_extent();
-        self.image_dirty = true;
+        self.touch();
     }
     fn redo(&mut self) {
         self.finish_edit();
         self.history.redo(&mut self.level);
         self.level.update_extent();
-        self.image_dirty = true;
+        self.touch();
     }
     fn can_undo(&self) -> bool {
         self.history.can_undo()
@@ -781,8 +798,9 @@ impl Document for LevelDoc {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        // keyboard: tools, copy / paste, escape, delete
-        if !ui.ctx().egui_wants_keyboard_input() {
+        // keyboard: tools, copy / paste, escape, delete (not while the pointer flies the 3D view)
+        let over_3d = self.view_mode != ViewMode::Map && self.preview.hovered;
+        if !ui.ctx().egui_wants_keyboard_input() && !over_3d {
             let (keys, copy, paste, delete, dup) = ui.input(|i| {
                 let k = |key| i.key_pressed(key) && i.modifiers.is_none();
                 (
@@ -832,6 +850,28 @@ impl Document for LevelDoc {
             }
         }
 
+        match self.view_mode {
+            ViewMode::Map => self.map_ui(ui),
+            ViewMode::ThreeD => self.preview_ui(ui),
+            ViewMode::Split => {
+                let w = ui.available_width() / 2.0;
+                egui::Panel::right("preview3d").default_size(w).resizable(true).show(ui, |ui| self.preview_ui(ui));
+                egui::CentralPanel::default().show(ui, |ui| self.map_ui(ui));
+            }
+        }
+        if self.view_mode == ViewMode::Map {
+            self.preview.hovered = false;
+        }
+        self.settle_edit(ui.ctx());
+    }
+
+    fn side_ui(&mut self, ui: &mut egui::Ui) {
+        self.side_panel(ui);
+    }
+}
+
+impl LevelDoc {
+    fn map_ui(&mut self, ui: &mut egui::Ui) {
         if self.image_dirty || self.image.is_none() {
             let img = self.render();
             match &mut self.image {
@@ -953,10 +993,20 @@ impl Document for LevelDoc {
             self.draw_column_selection(&painter, origin);
         }
         self.draw_ai_marks(&painter, origin);
-        self.settle_edit(ui.ctx());
+        if self.view_mode == ViewMode::Split {
+            self.draw_camera(&painter, origin);
+            if resp.double_clicked() {
+                if let Some(p) = self.hover_f {
+                    self.camera_to(p.x, p.y);
+                }
+            }
+        }
+        if self.drag.is_some() {
+            self.preview.lines_dirty = true;
+        }
     }
 
-    fn side_ui(&mut self, ui: &mut egui::Ui) {
+    fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Test in game").on_hover_text("save to a temporary file and start the game on it").clicked() {
                 self.test = true;
@@ -967,6 +1017,11 @@ impl Document for LevelDoc {
         }
         ui.separator();
         ui.heading("View");
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.view_mode, ViewMode::Map, "Map");
+            ui.selectable_value(&mut self.view_mode, ViewMode::Split, "Map + 3D").on_hover_text("double-click on the map to move the 3D camera there");
+            ui.selectable_value(&mut self.view_mode, ViewMode::ThreeD, "3D");
+        });
         let base_before = self.base;
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.base, Base::Textures, "Textures");
@@ -985,10 +1040,10 @@ impl Document for LevelDoc {
         });
         if set != self.look.set {
             self.look = Look::load(set);
-            self.image_dirty = true;
+            self.touch();
         }
         if self.base != base_before {
-            self.image_dirty = true;
+            self.touch();
         }
 
         ui.separator();

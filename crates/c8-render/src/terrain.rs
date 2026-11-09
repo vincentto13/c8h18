@@ -1,6 +1,6 @@
 //! Level mesh (spec 08 §5.2): floor quads and block faces as GPU triangles.
-use crate::data::level::{Level, MAP_H, MAP_W};
-use crate::gfx::{Vertex, K_TERRAIN};
+use crate::{Vertex, K_FLAT_TERRAIN, K_TERRAIN};
+use c8_data::level::{Level, MAP_H, MAP_W};
 
 const E: f32 = 64.0;
 /// UV entries (corner order of the quad), 63 stands for 64 - epsilon.
@@ -42,7 +42,7 @@ fn compose_bottom(cell_o: u8, face_o: u8) -> usize {
 pub struct MeshOpts<'a> {
     pub shading: bool,
     /// Some(table) = TEXTURE MAPPING off: textures with attribute byte 1 become flat colours
-    pub flat: Option<&'a crate::data::images::ColourTable>,
+    pub flat: Option<&'a c8_data::images::ColourTable>,
 }
 
 /// Texture attribute bytes (spec 08 §5.4): 0 = always textured, 1 = flat when mapping is off.
@@ -71,7 +71,7 @@ fn quad(out: &mut Vec<Vertex>, p: [[f32; 3]; 4], l: [f32; 4], uv_entry: usize, t
                 };
                 let c = table.flat(variant, tex as usize) as u32;
                 for &k in &t {
-                    out.push(Vertex { pos: p[k], uv: [0.0, 0.0], light: avg, kind: crate::gfx::K_FLAT_TERRAIN, param: c });
+                    out.push(Vertex { pos: p[k], uv: [0.0, 0.0], light: avg, kind: K_FLAT_TERRAIN, param: c });
                 }
                 continue;
             }

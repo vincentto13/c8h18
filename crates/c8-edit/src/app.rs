@@ -21,6 +21,9 @@ pub struct EditorApp {
 
 impl EditorApp {
     pub fn new(cc: &eframe::CreationContext<'_>, data: Option<PathBuf>, open: Option<PathBuf>) -> EditorApp {
+        if let Some(rs) = &cc.wgpu_render_state {
+            crate::gpu::set(rs.clone());
+        }
         let remembered = cc.storage.and_then(|s| s.get_string(DATA_KEY)).map(PathBuf::from);
         let mut app = EditorApp { data_dir: None, entries: Vec::new(), filter: String::new(), docs: Vec::new(), active: 0, status: String::new(), confirm_close: None, shot: std::env::var("HIEDIT_SHOT").ok().map(|p| (p, 0)) };
         let candidates = [data, remembered, Some(PathBuf::from("resources"))];

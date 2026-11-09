@@ -19,6 +19,7 @@ A Cargo workspace with three crates:
 |---|---|---|
 | `crates/c8-data` | the data file formats (spec 01), read and write; shared by the game and the editor | |
 | `crates/c8-game` | the game | `c8h18` |
+| `crates/c8-render` | the level mesh (floor quads and block faces) and vertex format, shared by the game's renderer and the editor's 3D preview | |
 | `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
 
 ## Build and run
@@ -150,6 +151,13 @@ block. **Run AI test** races the 8 computer players on the edited level in the g
 simulation (`c8h18 --sim`) and reports the laps each completed and where any got stuck for 15
 seconds or more (marked on the map).
 
+**3D preview**: View → Map / Map + 3D / 3D shows the level as the game builds it (same mesh code,
+colours lit exactly through the track's colour table), updated while you edit, with walls, the
+computer players' route, checkpoints, pickups, trucks and regions as lines. Drag to look, WASD or
+the arrow keys to fly, Q/E down/up, Shift faster, wheel forward; "Camera to map view" jumps above
+the map's centre, and in Map + 3D a double-click on the map moves the camera there (the camera is
+the white triangle on the map). Haze can be switched on.
+
 Every stroke is one undo step (⌘Z / ⇧⌘Z). Pan with the scroll wheel or a right/middle drag, zoom
 with pinch or Ctrl/⌘ + wheel.
 
@@ -180,4 +188,4 @@ the built-in MCP server, is in `docs/editor-plan.md`.
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
-30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected.
+30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected, `HIEDIT_VIEW=3d|split` with the 3D preview.
