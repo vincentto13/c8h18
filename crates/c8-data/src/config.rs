@@ -124,7 +124,8 @@ impl Config {
     /// Championship race number 0..5 = selected track - 1.
     pub fn race_number(&self) -> u16 { self.u16(0x2c76).min(5) }
     pub fn set_race_number(&mut self, v: u16) { self.set_u16(0x2c76, v.min(5)) }
-    pub fn language(&self) -> usize { (self.u16(0x2c7a) as usize).min(super::strings::count() - 1) }
+    /// The language; `--lang` (strings::force_language) wins over the saved one without being saved.
+    pub fn language(&self) -> usize { super::strings::forced_language().unwrap_or(self.u16(0x2c7a) as usize).min(super::strings::count() - 1) }
     pub fn set_language(&mut self, v: usize) { self.set_u16(0x2c7a, v.min(super::strings::count() - 1) as u16) }
     pub fn last_slot(&self) -> usize { (self.u16(0x2c7c) as usize).min(4) }
     pub fn set_last_slot(&mut self, v: usize) { self.set_u16(0x2c7c, v as u16) }

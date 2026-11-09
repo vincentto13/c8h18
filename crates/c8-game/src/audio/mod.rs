@@ -6,12 +6,8 @@
 //! GTL timbre bank SAMPLE.OPL on an emulated OPL3, sequenced at 120 Hz inside the callback.
 //! All state shared with the callback sits behind one `Arc<Mutex<Shared>>`.
 
-pub mod container;
 pub mod mixer;
-pub mod music;
-pub mod opl3;
-pub mod wav;
-pub mod xmidi;
+pub use c8_audio::{container, music, wav, xmidi};
 
 use crate::data::files;
 use mixer::Shared;

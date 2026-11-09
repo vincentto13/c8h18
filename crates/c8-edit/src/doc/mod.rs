@@ -2,9 +2,12 @@
 //! deals with this trait, so adding an editor for textures, fonts etc. means adding a type here.
 pub mod history;
 pub mod image;
+pub mod lang;
 pub mod level;
 pub mod palette;
 pub mod pixels;
+pub mod sound;
+pub mod table;
 pub mod viewer;
 
 use crate::resources::Kind;
@@ -55,6 +58,9 @@ pub fn open(path: PathBuf, kind: Kind, rel: String) -> Result<Box<dyn Document>,
     Ok(match kind {
         Kind::Level => Box::new(level::LevelDoc::open(path, rel)?),
         Kind::Palette => Box::new(palette::PaletteDoc::open(path, rel)?),
+        Kind::Strings => Box::new(lang::LangDoc::open(path, rel)?),
+        Kind::ColourTable => Box::new(table::TableDoc::open(path, rel)?),
+        Kind::Sound => Box::new(sound::SoundDoc::open(path, rel)?),
         Kind::TerrainTextures | Kind::Sky | Kind::Image | Kind::ModelTextures | Kind::Sprites | Kind::Font | Kind::Billboards => Box::new(image::ImageDoc::open(path, kind, rel)?),
         _ => Box::new(viewer::Viewer::open(path, kind, rel)?),
     })

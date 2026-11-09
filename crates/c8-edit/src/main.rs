@@ -7,6 +7,7 @@
 //! textures, fonts, sprites, pictures and the palette have editors, other kinds open in a viewer
 //! (see `docs/editor-plan.md`).
 mod app;
+mod audio;
 mod doc;
 mod gpu;
 mod launch;

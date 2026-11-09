@@ -19,6 +19,7 @@ A Cargo workspace with three crates:
 |---|---|---|
 | `crates/c8-data` | the data file formats (spec 01), read and write; shared by the game and the editor | |
 | `crates/c8-game` | the game | `c8h18` |
+| `crates/c8-audio` | sound and music banks (read and write), WAV samples, XMIDI tunes and the OPL3 music player, shared by the game and the editor | |
 | `crates/c8-render` | the level mesh (floor quads and block faces) and vertex format, shared by the game's renderer and the editor's 3D preview | |
 | `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
 
@@ -43,6 +44,7 @@ Options:
 | `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
 | `--override <dir>` | load data files from `<dir>` (same layout, e.g. `<dir>/DATA/TEXTU0-0.DAT`) in place of the data directory's; used by the editor's Test in game |
+| `--lang <code>` | use this language (`en`, `de`, `fr`, `es`, `it`, `pl`) instead of the saved one, without saving it |
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
 
@@ -171,15 +173,34 @@ between files); [ and ] or the arrow keys step through frames. Glyphs and sprite
 (a glyph's width is its advance) and cropped to their content. Colours come from the game palette;
 OLFNT/OSFNT glyphs are masks (0 = outline, any other value = text colour). **PNG**: export / import
 one frame, or all frames as one grid image to edit in any paint program; imported colours are
-matched to the nearest palette colour. The palette (PALET0-0) has its own editor; the colour tables
-are not recalculated from it.
+matched to the nearest palette colour. The palette (PALET0-0) has its own editor.
+
+**Colour tables** (TABLE0-N) show the 64 light rows (with a terrain texture at several light
+levels), the blend table and the flat colours, and regenerate them: light rows from the palette and
+a haze colour, the blend table from the palette, flat colours from the track's textures (after a
+palette edit: save the palette, then regenerate each table). The rebuilt light rows match 96 % of
+the shipped entries and the blend table 95 %.
+
+**Language files** (`lang/<code>.txt`) list every key with the English text beside the
+translation, edited in place; filters for problems, missing entries and entries still in English;
+checks for missing keys, keys out of range, `$` markup that differs from English, characters the
+fonts cannot draw and text wider than the screen in the large menu font, with a preview of the
+entry in that font. "Add missing entries" fills them with the English text. Comments and order of
+the file are kept.
+
+**Sound and music** (SOUND.DAT, MUSIC.DAT) list the banks, formats and items with their length and
+what the game uses them for; play samples and tunes (the FM tunes on the emulated OPL3, as in the
+game), show the waveform, export a sample as WAV, a tune as XMIDI or rendered to WAV, replace a
+sample from any PCM WAV (converted to 8-bit mono, in all three 8-bit formats at once) and a tune
+from an XMIDI file.
 
 Saving writes unpacked files (the game reads both; sheets also get their `.TAB`); originals in the
 data folder are never overwritten (Save asks for a new name). **Test in game** (button or ⌘R)
 writes the active file and every other open file with changes into a temporary override folder and
 starts `c8h18 --override <dir>` (the game next to the editor, or on the PATH): textures and
-skies on their track's race, levels on the race of the track set they are shown with, the rest in
-the menus. Colour tables, models, sounds and language files open read-only. The plan, including
+skies on their track's race, levels on the race of the track set they are shown with, colour
+tables and race sounds on their track's race, tunes where they play, a language with `--lang`, the
+rest in the menus. Models open read-only. The plan, including
 the built-in MCP server, is in `docs/editor-plan.md`.
 
 ## Debug automation

@@ -495,6 +495,13 @@ fn main() {
                 let _ = race::LEVEL_FILE.set(p.into());
             }
             i += 1;
+        } else if l == "--lang" {
+            if let Some(code) = args.get(i + 1) {
+                if let Err(e) = data::strings::force_language(code) {
+                    eprintln!("{e}");
+                }
+            }
+            i += 1;
         } else if l == "--override" {
             if let Some(p) = args.get(i + 1) {
                 data::files::set_override_dir(Some(p.into()));

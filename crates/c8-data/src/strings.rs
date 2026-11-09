@@ -19,6 +19,18 @@ struct Lang {
 }
 
 static LANGS: OnceLock<Vec<Lang>> = OnceLock::new();
+static FORCED: OnceLock<usize> = OnceLock::new();
+
+/// Use this language regardless of the config (game option `--lang <code>`); not saved.
+pub fn force_language(code: &str) -> Result<(), String> {
+    let n = CODES.iter().position(|c| c.eq_ignore_ascii_case(code)).ok_or_else(|| format!("unknown language `{code}` (known: {})", CODES.join(", ")))?;
+    let _ = FORCED.set(n);
+    Ok(())
+}
+
+pub fn forced_language() -> Option<usize> {
+    FORCED.get().copied()
+}
 
 fn parse(text: &str, file: &str) -> Result<Lang, String> {
     let mut l = Lang { table: vec![None; COUNT], named: HashMap::new() };
@@ -124,6 +136,117 @@ pub fn to_cp437(s: &str) -> Vec<u8> {
         .collect()
 }
 
+/// A language file kept line by line, so that editing an entry keeps the comments, order and
+/// layout of everything else.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct LangFile {
+    pub lines: Vec<String>,
+}
+
+/// The key as the game reads it: numeric keys as three digits (`7` and `007` are the same).
+pub fn normal_key(k: &str) -> String {
+    let k = k.trim();
+    match k.parse::<usize>() {
+        Ok(n) if k.bytes().all(|b| b.is_ascii_digit()) => format!("{n:03}"),
+        _ => k.to_string(),
+    }
+}
+
+/// The table index of a numeric key.
+pub fn table_index(key: &str) -> Option<usize> {
+    if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) { None } else { key.parse().ok() }
+}
+
+impl LangFile {
+    pub fn parse(text: &str) -> LangFile {
+        LangFile { lines: text.lines().map(|l| l.trim_end_matches('\r').to_string()).collect() }
+    }
+    pub fn encode(&self) -> String {
+        let mut s = self.lines.join("\n");
+        s.push('\n');
+        s
+    }
+    /// (key, text) of a line, if it is an entry.
+    fn entry(line: &str) -> Option<(String, &str)> {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with('#') {
+            return None;
+        }
+        let (k, v) = t.split_once('=')?;
+        Some((normal_key(k), v.trim()))
+    }
+    /// Lines that are neither entries, comments nor blank (the game refuses the file).
+    pub fn bad_lines(&self) -> Vec<usize> {
+        self.lines.iter().enumerate().filter(|(_, l)| { let t = l.trim(); !t.is_empty() && !t.starts_with('#') && !t.contains('=') }).map(|(i, _)| i).collect()
+    }
+    /// The keys in file order (later duplicates included).
+    pub fn keys(&self) -> Vec<String> {
+        self.lines.iter().filter_map(|l| Self::entry(l)).map(|(k, _)| k).collect()
+    }
+    fn line_of(&self, key: &str) -> Option<usize> {
+        let key = normal_key(key);
+        // the game keeps the last of duplicate entries
+        self.lines.iter().rposition(|l| Self::entry(l).is_some_and(|(k, _)| k == key))
+    }
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.line_of(key).and_then(|i| Self::entry(&self.lines[i])).map(|(_, v)| v)
+    }
+    /// Set an entry. A new entry goes after the nearest key that precedes it in `order` (the
+    /// English file's keys), else at the end.
+    pub fn set(&mut self, key: &str, text: &str, order: &[String]) {
+        let key = normal_key(key);
+        let text = text.replace(['\n', '\r'], " ");
+        if let Some(i) = self.line_of(&key) {
+            let old = &self.lines[i];
+            let k = old.split_once('=').map(|(k, _)| k.trim_end()).unwrap_or(&key);
+            self.lines[i] = format!("{k} = {}", text.trim());
+            return;
+        }
+        let line = format!("{key} = {}", text.trim());
+        let pos = order.iter().position(|k| *k == key);
+        let after = pos.and_then(|p| order[..p].iter().rev().find_map(|k| self.line_of(k)));
+        match after {
+            Some(i) => self.lines.insert(i + 1, line),
+            None => self.lines.push(line),
+        }
+    }
+    /// Remove every entry of a key.
+    pub fn remove(&mut self, key: &str) {
+        let key = normal_key(key);
+        self.lines.retain(|l| Self::entry(l).is_none_or(|(k, _)| k != key));
+    }
+}
+
+/// The `$` markup codes in a string (`$` + letter + optional number, spec 02 §2.3), in order.
+pub fn markup_codes(s: &str) -> Vec<String> {
+    let b = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'$' {
+            let mut end = i + 1;
+            if end < b.len() && b[end].is_ascii_alphabetic() {
+                end += 1;
+                while end < b.len() && b[end].is_ascii_digit() {
+                    end += 1;
+                }
+            }
+            out.push(s[i..end].to_string());
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Characters of a string the original fonts have no glyph for.
+pub fn missing_glyphs(s: &str) -> Vec<char> {
+    let mut v: Vec<char> = s.chars().filter(|&c| c != '?' && to_cp437(&c.to_string()) == b"?").collect();
+    v.dedup();
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,5 +278,24 @@ mod tests {
             }
         }
         assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+
+    #[test]
+    fn lang_file_edits_keep_layout() {
+        let mut f = LangFile::parse("# head\n\nlanguage = X\n000 = NULL\n002 = TWO\n");
+        let order: Vec<String> = ["language", "000", "001", "002"].map(String::from).to_vec();
+        f.set("1", "ONE", &order);
+        f.set("002", "DEUX", &order);
+        assert_eq!(f.encode(), "# head\n\nlanguage = X\n000 = NULL\n001 = ONE\n002 = DEUX\n");
+        assert_eq!(f.get("001"), Some("ONE"));
+        f.remove("000");
+        assert_eq!(f.keys(), ["language", "001", "002"]);
+        assert_eq!(markup_codes("$S1HELLO $G WORLD$"), ["$S1", "$G", "$"]);
+        assert_eq!(missing_glyphs("ŁÓDŹ €"), vec!['€']);
     }
 }

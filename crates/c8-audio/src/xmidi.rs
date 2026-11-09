@@ -33,7 +33,6 @@ pub struct Sequence {
 
 impl Sequence {
     /// Total length in intervals (ignoring loops).
-    #[allow(dead_code)] // used by examples/audio_test
     pub fn length(&self) -> u64 {
         self.events.iter().map(|e| e.delta as u64).sum()
     }

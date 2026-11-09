@@ -1,0 +1,10 @@
+[package]
+name = "c8-audio"
+description = "Sound and music containers, WAV samples, XMIDI tunes and the OPL3 music player, shared by the game and the editor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+c8-data = { path = "../c8-data" }
+oplon = "1.0.0"

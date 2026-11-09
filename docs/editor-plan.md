@@ -25,8 +25,7 @@ Targets: macOS first, Linux and Windows from the same code.
 - Expose the same operations over MCP, with undo, so an agent's edits are visible and reversible
   in the open editor.
 
-Out of scope for v1: editing textures or models themselves (the pixels and meshes), sound, and the
-front-end carousel model.
+Out of scope for v1: editing models (the meshes) and the front-end carousel model.
 
 ## 2. Architecture
 
@@ -37,6 +36,8 @@ Cargo.toml                 workspace root (default member: the game)
 crates/
   c8-data/                library: the data file formats (spec 01), read AND write;
                            levels first, then textures, fonts, sprites, models...
+  c8-audio/               sound/music banks, WAV, XMIDI, OPL3 music player (game + editor)
+  c8-render/              level mesh and vertex format (game + editor 3D preview)
   c8-game/                the game, binary `c8h18`
   c8-edit/                the editor, binary `c8h18-edit`
     src/resources.rs       the data folder as resources grouped by kind
@@ -186,6 +187,7 @@ Safety:
 | 2 | Terrain tools: heights, textures and orientation, light paint/bake; selection copy/paste; texture attributes; "Test in game" (game option `--level`) | **done** |
 | 2b | Resource editors: pixel editor for terrain textures, skies, screens, model texture atlases, billboards, sprite sheets and fonts (PNG import/export, glyph resize, font preview); palette editor; "Test in game" for any edited file via the game option `--override <dir>` | **done** |
 | 3 | Columns and blocks; entities (checkpoints, waypoint chains, walls, start grid, pickups, trucks, cameras, triggers/morphs); regions; validation panel; AI test through the game's headless sim | **done** (AI test via `c8h18 --override <dir> --sim`, so the `c8-sim` extraction of phase 5 is no longer needed for it) |
+| 3b | Other resource editors: colour tables (view, regenerate from palette, haze and textures), language files (key list against English, checks, font preview; game option `--lang`), sound and music banks (play, export, replace samples from WAV and tunes from XMIDI; audio code moved to `c8-audio`) | **done** |
 | 4 | MCP: headless stdio and live HTTP modes, the tool set above, image renders, activity log | Claude Code can build a small track loop through MCP alone |
 | 5 | 3D preview (shared mesh code in `c8-render`, exact light-table colours, fly camera, entity lines) | **done**; the in-editor AI test moved to phase 3 (via `--sim`). Models and billboards in the preview are still open |
 | 6 | Custom tracks in the game menus; minimap generation; packaging for macOS/Linux/Windows | an edited track is selectable in the game on all three systems |

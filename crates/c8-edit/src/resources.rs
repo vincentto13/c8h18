@@ -52,7 +52,8 @@ impl Kind {
             return if name.starts_with("tex") { Kind::ModelTextures } else { Kind::Model };
         }
         if dir == "sound" {
-            return Kind::Sound;
+            // the containers; the rest are the original's sound drivers and timbre banks
+            return if name == "sound.dat" || name == "music.dat" { Kind::Sound } else { Kind::Other };
         }
         if name.starts_with("level") && name.ends_with(".dat") {
             return Kind::Level;
@@ -124,7 +125,9 @@ mod tests {
         assert_eq!(Kind::of("DATA/OLFNT0-1.DAT"), Kind::Font);
         assert_eq!(Kind::of("DATA/PALET0-0.DAT"), Kind::Palette);
         assert_eq!(Kind::of("lang/pl.txt"), Kind::Strings);
-        assert_eq!(Kind::of("SOUND/SOUND.BNK"), Kind::Sound);
+        assert_eq!(Kind::of("SOUND/SOUND.DAT"), Kind::Sound);
+        assert_eq!(Kind::of("SOUND/MUSIC.DAT"), Kind::Sound);
+        assert_eq!(Kind::of("SOUND/SB16.DIG"), Kind::Other);
         assert_eq!(Kind::of("DATA/TMAPS.DAT"), Kind::Billboards);
         assert_eq!(Kind::of("DATA/OSCR0-1.DAT"), Kind::Image);
         assert_eq!(Kind::of("OBJECTS/DATA/TEX0-0.DAT"), Kind::ModelTextures);

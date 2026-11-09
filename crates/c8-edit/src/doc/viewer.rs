@@ -1,5 +1,5 @@
-//! Viewer for resource kinds that have no editor yet: file facts plus a preview where the format
-//! is simple (palettes, terrain textures, skies, language files). Editors replace it kind by kind.
+//! Viewer for resource kinds that have no editor yet (models, other files): file facts, plus a
+//! preview for the simple formats. Editors replace it kind by kind.
 use super::Document;
 use crate::resources::Kind;
 use eframe::egui::{self, Color32, TextureHandle};

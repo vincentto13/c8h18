@@ -158,7 +158,7 @@ impl Document for PaletteDoc {
             self.commit();
         }
         ui.separator();
-        ui.label(egui::RichText::new("The game keeps 6 bits per channel (0..63). Terrain lighting and translucency come from the colour tables (TABLE0-N), which are built for the original palette and are not recalculated here, so large changes look wrong in races. The menus and sprites use the palette directly.").small().color(Color32::GRAY));
+        ui.label(egui::RichText::new("The game keeps 6 bits per channel (0..63). Terrain lighting and translucency come from the colour tables (TABLE0-N), built for a palette: after larger changes, save the palette, open each colour table and regenerate it. The menus and sprites use the palette directly.").small().color(Color32::GRAY));
         ui.collapsing("History", |ui| {
             for l in self.history.labels().collect::<Vec<_>>().iter().rev().take(30) {
                 ui.label(egui::RichText::new(l).small());

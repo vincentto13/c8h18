@@ -13,6 +13,8 @@ path = "src/main.rs"
 eframe = { version = "0.37.0", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11", "persistence"] }
 env_logger = "0.11.11"
 bytemuck = "1.25.2"
+cpal = "0.18.2"
+c8-audio = { path = "../c8-audio" }
 c8-data = { path = "../c8-data" }
 c8-render = { path = "../c8-render" }
 log.workspace = true

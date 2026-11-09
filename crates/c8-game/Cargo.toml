@@ -15,10 +15,10 @@ cpal = "0.18.2"
 env_logger = "0.11.11"
 gilrs = "0.11.2"
 glam = "0.34.2"
+c8-audio = { path = "../c8-audio" }
 c8-data = { path = "../c8-data" }
 c8-render = { path = "../c8-render" }
 log.workspace = true
-oplon = "1.0.0"
 png.workspace = true
 pollster = "1.0.1"
 wgpu = "30.0.1"
