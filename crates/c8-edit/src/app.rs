@@ -5,6 +5,34 @@ use eframe::egui::{self, Color32, Key, KeyboardShortcut, Modifiers};
 use std::path::{Path, PathBuf};
 
 const DATA_KEY: &str = "data_dir";
+const MCP_KEY: &str = "mcp";
+/// Default port of the live MCP endpoint (another free port is used when it is taken).
+const MCP_PORT: u16 = 47_811;
+
+/// Live MCP settings, remembered between runs: on/off, port and token (so a client configured
+/// once keeps working).
+#[derive(Clone)]
+struct McpPrefs {
+    enabled: bool,
+    port: u16,
+    token: String,
+}
+
+impl McpPrefs {
+    fn load(s: Option<&dyn eframe::Storage>) -> McpPrefs {
+        let v = s.and_then(|s| s.get_string(MCP_KEY)).unwrap_or_default();
+        let mut it = v.split(' ');
+        let enabled = it.next() != Some("off");
+        let port = it.next().and_then(|p| p.parse().ok()).unwrap_or(MCP_PORT);
+        // debug automation: HIEDIT_MCP_TOKEN / HIEDIT_MCP_PORT fix the token and port
+        let token = std::env::var("HIEDIT_MCP_TOKEN").ok().or_else(|| it.next().filter(|t| t.len() >= 16).map(str::to_string)).unwrap_or_else(crate::mcp::server::new_token);
+        let port = std::env::var("HIEDIT_MCP_PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(port);
+        McpPrefs { enabled, port, token }
+    }
+    fn save(&self) -> String {
+        format!("{} {} {}", if self.enabled { "on" } else { "off" }, self.port, self.token)
+    }
+}
 
 pub struct EditorApp {
     data_dir: Option<PathBuf>,
@@ -17,6 +45,11 @@ pub struct EditorApp {
     confirm_close: Option<usize>,
     /// debug: `HIEDIT_SHOT=<png>` saves a screenshot after a few frames and quits
     shot: Option<(String, u32)>,
+    mcp_prefs: McpPrefs,
+    mcp: Option<crate::mcp::server::Live>,
+    mcp_error: Option<String>,
+    show_mcp: bool,
+    ctx: egui::Context,
 }
 
 impl EditorApp {
@@ -25,7 +58,26 @@ impl EditorApp {
             crate::gpu::set(rs.clone());
         }
         let remembered = cc.storage.and_then(|s| s.get_string(DATA_KEY)).map(PathBuf::from);
-        let mut app = EditorApp { data_dir: None, entries: Vec::new(), filter: String::new(), docs: Vec::new(), active: 0, status: String::new(), confirm_close: None, shot: std::env::var("HIEDIT_SHOT").ok().map(|p| (p, 0)) };
+        let mcp_prefs = McpPrefs::load(cc.storage);
+        let mut app = EditorApp {
+            data_dir: None,
+            entries: Vec::new(),
+            filter: String::new(),
+            docs: Vec::new(),
+            active: 0,
+            status: String::new(),
+            confirm_close: None,
+            shot: std::env::var("HIEDIT_SHOT").ok().map(|p| (p, 0)),
+            mcp_prefs,
+            mcp: None,
+            mcp_error: None,
+            show_mcp: std::env::var("HIEDIT_MCP_PANEL").is_ok(),
+            ctx: cc.egui_ctx.clone(),
+        };
+        // debug screenshots do not start the endpoint
+        if app.mcp_prefs.enabled && (app.shot.is_none() || std::env::var("HIEDIT_MCP_TOKEN").is_ok()) {
+            app.start_mcp();
+        }
         let candidates = [data, remembered, Some(PathBuf::from("resources"))];
         if let Some(d) = candidates.into_iter().flatten().find(|d| resources::is_data_dir(d)) {
             app.set_data_dir(d);
@@ -34,6 +86,84 @@ impl EditorApp {
             app.open_path(p);
         }
         app
+    }
+
+    fn start_mcp(&mut self) {
+        let ctx = self.ctx.clone();
+        match crate::mcp::server::start_live(self.mcp_prefs.port, self.mcp_prefs.token.clone(), std::sync::Arc::new(move || ctx.request_repaint())) {
+            Ok(live) => {
+                self.mcp_prefs.port = live.port;
+                self.mcp = Some(live);
+                self.mcp_error = None;
+            }
+            Err(e) => self.mcp_error = Some(e),
+        }
+    }
+
+    fn stop_mcp(&mut self) {
+        self.mcp = None;
+    }
+
+    /// Answer the agent's requests (on this, the UI thread, where the documents live).
+    fn serve_mcp(&mut self) {
+        let Some(live) = &self.mcp else { return };
+        let reqs: Vec<_> = live.rx.try_iter().collect();
+        for r in reqs {
+            crate::mcp::server::handle(self, r);
+        }
+    }
+
+    fn mcp_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_mcp;
+        let mut renew = false;
+        egui::Window::new("MCP (agent access)").open(&mut open).default_width(460.0).show(ctx, |ui| {
+            let mut enabled = self.mcp_prefs.enabled;
+            if ui.checkbox(&mut enabled, "Let MCP clients (e.g. Claude Code) edit the open levels").changed() {
+                self.mcp_prefs.enabled = enabled;
+                if enabled { self.start_mcp() } else { self.stop_mcp() }
+            }
+            if let Some(e) = &self.mcp_error {
+                ui.colored_label(Color32::from_rgb(230, 90, 80), e);
+            }
+            let Some(live) = &self.mcp else { return };
+            ui.label(format!("Endpoint: {} (this computer only)", live.url()));
+            ui.horizontal(|ui| {
+                ui.label("Token:");
+                ui.monospace(live.token());
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Copy Claude Code command").on_hover_text(live.claude_command()).clicked() {
+                    ctx.copy_text(live.claude_command());
+                    self.status = "copied the `claude mcp add` command".into();
+                }
+                if ui.button("New token").on_hover_text("Clients configured with the old token stop working").clicked() {
+                    renew = true;
+                }
+            });
+            let mut paused = live.handler.paused.load(std::sync::atomic::Ordering::Relaxed);
+            if ui.checkbox(&mut paused, "Pause agent edits (reading still works)").changed() {
+                live.handler.paused.store(paused, std::sync::atomic::Ordering::Relaxed);
+            }
+            ui.label(egui::RichText::new("Agent edits go into the level's normal undo history, labelled \"MCP: ...\" (Cmd+Z undoes them). Tools work on the active level tab, or the last level opened.").small().color(Color32::GRAY));
+            ui.separator();
+            ui.label("Activity");
+            egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
+                let lines = live.handler.log.lines();
+                if lines.is_empty() {
+                    ui.label(egui::RichText::new("no requests yet").color(Color32::GRAY));
+                }
+                for l in lines {
+                    ui.label(egui::RichText::new(l).small().monospace());
+                }
+            });
+        });
+        self.show_mcp = open;
+        if renew {
+            self.mcp_prefs.token = crate::mcp::server::new_token();
+            if let Some(l) = &self.mcp {
+                l.set_token(self.mcp_prefs.token.clone());
+            }
+        }
     }
 
     fn set_data_dir(&mut self, d: PathBuf) {
@@ -192,7 +322,8 @@ impl EditorApp {
         let Some((path, frames)) = &mut self.shot else { return };
         *frames += 1;
         ctx.request_repaint();
-        if *frames == 30 {
+        let at = std::env::var("HIEDIT_SHOT_FRAMES").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+        if *frames == at {
             let path = path.clone();
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |img| {
                 let f = std::fs::File::create(&path).expect("screenshot file");
@@ -253,8 +384,12 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.serve_mcp();
         self.shortcuts(&ctx);
         self.debug_shot(&ctx);
+        if self.show_mcp {
+            self.mcp_window(&ctx);
+        }
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
         egui::Panel::bottom("status").show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -263,6 +398,16 @@ impl eframe::App for EditorApp {
                     ui.separator();
                 }
                 ui.label(&self.status);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (text, colour) = match &self.mcp {
+                        Some(l) if l.handler.paused.load(std::sync::atomic::Ordering::Relaxed) => (format!("MCP :{} paused", l.port), Color32::from_rgb(230, 180, 60)),
+                        Some(l) => (format!("MCP :{}", l.port), Color32::from_rgb(110, 200, 120)),
+                        None => ("MCP off".to_string(), Color32::GRAY),
+                    };
+                    if ui.add(egui::Button::new(egui::RichText::new(text).color(colour)).frame(false)).on_hover_text("Agent access: endpoint, token, activity").clicked() {
+                        self.show_mcp = !self.show_mcp;
+                    }
+                });
             });
         });
         egui::Panel::left("browser").default_size(240.0).resizable(true).show(ui, |ui| self.browser(ui));
@@ -324,5 +469,64 @@ impl eframe::App for EditorApp {
         if let Some(d) = &self.data_dir {
             storage.set_string(DATA_KEY, d.display().to_string());
         }
+        storage.set_string(MCP_KEY, self.mcp_prefs.save());
+    }
+}
+
+/// Live MCP: the agent works on the editor's open documents.
+impl crate::mcp::Workspace for EditorApp {
+    fn data_dir(&self) -> Option<PathBuf> {
+        self.data_dir.clone()
+    }
+    fn levels(&mut self) -> Vec<(String, PathBuf, bool, bool)> {
+        let target = self.default_level();
+        self.docs
+            .iter_mut()
+            .enumerate()
+            .filter_map(|(i, d)| {
+                let (t, p, dirty) = (d.title(), d.path().map(Path::to_path_buf).unwrap_or_default(), d.dirty());
+                d.as_level().map(|_| (t, p, dirty, Some(i) == target))
+            })
+            .collect()
+    }
+    fn level(&mut self, name: Option<&str>) -> Result<&mut crate::doc::level::LevelDoc, String> {
+        let i = match name {
+            None => self.default_level().ok_or("no level is open in the editor: use level_open")?,
+            Some(n) => self
+                .docs
+                .iter_mut()
+                .position(|d| (d.title().eq_ignore_ascii_case(n) || d.path().and_then(|p| p.file_name()).is_some_and(|f| f.to_string_lossy().eq_ignore_ascii_case(n))) && d.as_level().is_some())
+                .ok_or(format!("no open level named {n}"))?,
+        };
+        Ok(self.docs[i].as_level().unwrap())
+    }
+    fn open_level(&mut self, path: PathBuf) -> Result<String, String> {
+        if Kind::of(&path.to_string_lossy()) != Kind::Level {
+            return Err(format!("{} is not a level file (LEVEL*.DAT)", path.display()));
+        }
+        let before = self.docs.len();
+        self.open_path(path.clone());
+        let opened = self.docs.len() > before || self.docs.get(self.active).is_some_and(|d| d.path() == Some(path.as_path()));
+        if !opened {
+            return Err(self.status.clone());
+        }
+        Ok(self.docs[self.active].title())
+    }
+    fn may_write(&self, p: &Path) -> Result<(), String> {
+        if self.is_original(p) { Err(format!("{} is in the game data folder, which is never written", p.display())) } else { Ok(()) }
+    }
+    fn may_read(&self, _: &Path) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl EditorApp {
+    /// The level MCP tools work on by default: the active tab if it is a level, else the last
+    /// level tab.
+    fn default_level(&mut self) -> Option<usize> {
+        if self.docs.get_mut(self.active).is_some_and(|d| d.as_level().is_some()) {
+            return Some(self.active);
+        }
+        (0..self.docs.len()).rev().find(|&i| self.docs[i].as_level().is_some())
     }
 }

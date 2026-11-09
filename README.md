@@ -200,8 +200,45 @@ writes the active file and every other open file with changes into a temporary o
 starts `c8h18 --override <dir>` (the game next to the editor, or on the PATH): textures and
 skies on their track's race, levels on the race of the track set they are shown with, colour
 tables and race sounds on their track's race, tunes where they play, a language with `--lang`, the
-rest in the menus. Models open read-only. The plan, including
-the built-in MCP server, is in `docs/editor-plan.md`.
+rest in the menus. Models open read-only. The plan is in `docs/editor-plan.md`.
+
+### MCP (AI agents)
+
+The editor is also an MCP server, so an agent such as Claude Code can inspect and edit levels:
+- read cells, terrain, textures and light;
+- edit block columns, entities, wall and waypoint chains, and regions;
+- run the checks and the AI test;
+- see the level through top-down and 3D pictures.
+
+Every editing call is one undo step, labelled "MCP: …".
+
+- **Live, in the running editor.** The editor listens on `http://127.0.0.1:47811/mcp` (another
+  free port if that one is taken). It accepts this computer only and needs a bearer token.
+  - Click "MCP" in the status bar for the endpoint, the token, a "Copy Claude Code command" button
+    (`claude mcp add --transport http c8h18-edit <url> --header "Authorization: Bearer <token>"`),
+    a pause switch and the activity log.
+  - The agent works on the open level tabs, and you see its edits as they happen. Cmd+Z undoes them.
+  - The port and token are remembered; "New token" replaces the token.
+- **Headless.** `c8h18-edit mcp --data <game data> [--allow <folder>]... [level]` serves MCP over
+  stdio without a window, e.g.
+  `claude mcp add c8h18-edit -- c8h18-edit mcp --data /path/to/game --allow /path/to/tracks`.
+  - Levels are read from the data folder and the allowed folders, and written only into the
+    allowed folders (default: the current directory).
+  - The game data folder is never written in either mode.
+
+Tools:
+- `editor_status`, `level_open` (an original track as a template, or a file), `level_save`,
+  `level_info`;
+- `cells_read`, `cells_write`, `heights_fill`, `heights_ramp`, `heights_smooth`, `textures_fill`,
+  `light_fill`, `light_bake`, `texture_attr_set`;
+- `columns_list`, `block_define`, `column_define`, `column_place`, `column_clear`;
+- `entities_list`, `entity_add`, `entity_update`, `entity_delete`, `chain_add`;
+- `region_add`, `region_update`, `region_delete`;
+- `validate`, `ai_test`, `render_top`, `render_3d` (PNG images);
+- `history`, `undo`, `redo`.
+
+Resources: `docs://format` (units, layers, entity types, what a race needs), `level://summary`,
+`level://validation`. Prompts: `design-track`, `fix-validation`.
 
 ## Debug automation
 
@@ -209,4 +246,4 @@ the built-in MCP server, is in `docs/editor-plan.md`.
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
-30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected, `HIEDIT_VIEW=3d|split` with the 3D preview.
+30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected, `HIEDIT_VIEW=3d|split` with the 3D preview. `HIEDIT_SHOT_FRAMES=<n>` takes the screenshot after n frames; `HIEDIT_MCP_TOKEN` / `HIEDIT_MCP_PORT` fix the live MCP token and port (and keep the endpoint on with `HIEDIT_SHOT`), `HIEDIT_MCP_PANEL=1` opens the MCP panel.

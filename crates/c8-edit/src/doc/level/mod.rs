@@ -2,6 +2,7 @@
 //! terrain tools (height, texture, light, selection with copy/paste), texture attributes, the
 //! Objects tool (entities and regions), the Blocks tool (columns and blocks), track checks with
 //! an AI test, and "Test in game".
+mod agent;
 mod blocks;
 mod check;
 mod edit;
@@ -474,10 +475,19 @@ impl LevelDoc {
     /// Light every corner in the selection (or the whole map) from its slope: light from the
     /// azimuth, `ambient` on flat ground, ± `strength` rows on slopes.
     fn bake_light(&mut self) {
-        let (x0, y0, x1, y1) = self.selection.unwrap_or((0, 0, MAP_W as i32 - 1, MAP_H as i32 - 1));
+        let area = self.selection.unwrap_or((0, 0, MAP_W as i32 - 1, MAP_H as i32 - 1));
+        for (i, v) in self.baked_light(area) {
+            self.edit_cell(i, |c| c.light = v);
+        }
+        self.end_stroke("bake light");
+    }
+
+    /// Light values baked from the slopes for the cells in the area (see [`Self::bake_light`]).
+    fn baked_light(&self, (x0, y0, x1, y1): (i32, i32, i32, i32)) -> Vec<(usize, i16)> {
         let a = self.bake_azimuth.to_radians();
         // map rows grow southwards; azimuth 0 = light from the north, clockwise
         let (lx, ly) = (a.sin(), -a.cos());
+        let mut out = Vec::new();
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let h = |x: i32, y: i32| self.level.corner_h(x, y);
@@ -485,11 +495,10 @@ impl LevelDoc {
                 // a slope facing the light (rising away from it) is brighter
                 let facing = -(dx * lx + dy * ly);
                 let row = (self.bake_ambient + facing * self.bake_strength).clamp(2.0, 62.0);
-                let v = (row * 256.0) as i16 | 0xff;
-                self.edit_cell(y as usize * MAP_W + x as usize, |c| c.light = v);
+                out.push((y as usize * MAP_W + x as usize, (row * 256.0) as i16 | 0xff));
             }
         }
-        self.end_stroke("bake light");
+        out
     }
 
     fn copy(&mut self) {
@@ -745,6 +754,9 @@ impl Command<Level> for TexAttrEdit {
 }
 
 impl Document for LevelDoc {
+    fn as_level(&mut self) -> Option<&mut LevelDoc> {
+        Some(self)
+    }
     fn title(&self) -> String {
         self.rel.clone()
     }
@@ -1328,4 +1340,18 @@ mod tests {
         }
         assert_eq!(d.level.entities.len(), n0);
     }
+}
+
+/// Markdown table of the entity types and sub-types with what their fields mean (MCP guide).
+pub fn entity_reference() -> String {
+    let mut s = String::from("| type | sub | name | fields |\n|---|---|---|---|\n");
+    for kind in [1u8, 2, 3, 5, 8, 9, 10] {
+        for (sub, name) in edit::sub_types(kind) {
+            let e = c8_data::level::Entity { kind, sub, ..Default::default() };
+            let u = edit::field_use(&e);
+            let fields: Vec<String> = [("link", u.link), ("value", u.value), ("w", u.w), ("h", u.h), ("target_group", u.target)].iter().filter_map(|(k, v)| v.map(|v| format!("{k}: {v}"))).collect();
+            s.push_str(&format!("| {kind} {} | {sub} | {name} | {} |\n", edit::type_name(kind), fields.join("; ")));
+        }
+    }
+    s
 }

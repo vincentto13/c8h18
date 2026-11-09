@@ -17,11 +17,11 @@ const FLOOR: usize = 6;
 
 impl LevelDoc {
     /// Cells that use column id.
-    fn column_users(&self, id: usize) -> usize {
+    pub(super) fn column_users(&self, id: usize) -> usize {
         self.level.cells.iter().filter(|c| c.tex < 0 && -(c.tex as i32) as usize == id).count()
     }
 
-    fn free_column(&self) -> Option<usize> {
+    pub(super) fn free_column(&self) -> Option<usize> {
         let mut used = vec![false; MAX_COLUMNS];
         for c in self.level.cells.iter().filter(|c| c.tex < 0) {
             used[(-(c.tex as i32) as usize).min(MAX_COLUMNS - 1)] = true;
@@ -29,7 +29,7 @@ impl LevelDoc {
         (1..self.level.columns.len().min(MAX_COLUMNS)).find(|&i| !used[i] && self.level.columns[i] == Column::default())
     }
 
-    fn free_block(&self) -> Option<usize> {
+    pub(super) fn free_block(&self) -> Option<usize> {
         let mut used = vec![false; MAX_BLOCKS];
         for c in &self.level.columns {
             for &b in &c.blocks {

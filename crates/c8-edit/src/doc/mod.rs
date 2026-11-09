@@ -51,6 +51,10 @@ pub trait Document {
     fn wants_test(&mut self) -> bool {
         false
     }
+    /// The level document behind this one, for MCP.
+    fn as_level(&mut self) -> Option<&mut level::LevelDoc> {
+        None
+    }
 }
 
 /// Open a file as the document type for its kind.

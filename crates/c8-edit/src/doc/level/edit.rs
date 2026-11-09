@@ -1,5 +1,5 @@
-//! Structural edits (entities, regions, columns, blocks; with any cell changes they cause) as
-//! snapshot commands, plus the names of the entity types (spec 01 §9.4).
+//! Structural edits (entities, regions, columns, blocks, texture attributes; with any cell changes
+//! they cause) as snapshot commands, plus the names of the entity types (spec 01 §9.4).
 use super::LevelDoc;
 use crate::doc::history::Command;
 use c8_data::level::{Block, Cell, Column, Entity, Level, Region};
@@ -11,17 +11,19 @@ pub(super) struct Structure {
     blocks: Vec<Block>,
     entities: Vec<Entity>,
     regions: Vec<Region>,
+    tex_attr: [u16; 256],
 }
 
 impl Structure {
     fn of(l: &Level) -> Structure {
-        Structure { columns: l.columns.clone(), blocks: l.blocks.clone(), entities: l.entities.clone(), regions: l.regions.clone() }
+        Structure { columns: l.columns.clone(), blocks: l.blocks.clone(), entities: l.entities.clone(), regions: l.regions.clone(), tex_attr: l.tex_attr }
     }
     fn put(&self, l: &mut Level) {
         l.columns.clone_from(&self.columns);
         l.blocks.clone_from(&self.blocks);
         l.entities.clone_from(&self.entities);
         l.regions.clone_from(&self.regions);
+        l.tex_attr = self.tex_attr;
     }
 }
 
@@ -81,6 +83,16 @@ impl LevelDoc {
         self.history.run(c, &mut self.level);
         self.level.update_extent();
         self.touch();
+    }
+
+    /// Abandon the edit in progress, restoring the level as it was at its start.
+    pub(super) fn cancel_edit(&mut self) {
+        if let Some(p) = self.pending.take() {
+            p.before.put(&mut self.level);
+            self.level.cells = p.cells;
+            self.level.update_extent();
+            self.touch();
+        }
     }
 
     /// One complete edit.

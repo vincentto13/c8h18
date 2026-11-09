@@ -329,6 +329,108 @@ impl LevelDoc {
         self.preview.cam = Some(cam);
     }
 
+    /// Create the pipelines, upload the texture set, and rebuild the mesh and lines if they
+    /// changed (`throttle`: at most 8 mesh rebuilds a second, for painting).
+    fn prepare_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, throttle: bool) {
+        if self.preview.gpu.is_none() {
+            self.preview.gpu = Some(Gpu::new(device));
+        }
+        if self.preview.set != Some(self.look.set) {
+            self.upload_look(device, queue);
+            self.preview.redraw = true;
+        }
+        if self.preview.mesh_dirty && (!throttle || self.preview.last_mesh.elapsed() > Duration::from_millis(120)) {
+            let verts = build_mesh(&self.level, &MeshOpts { shading: true, flat: None });
+            let g = self.preview.gpu.as_mut().unwrap();
+            g.vbuf = Some((device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("preview-mesh"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX }), verts.len() as u32));
+            self.preview.mesh_dirty = false;
+            self.preview.lines_dirty = true;
+            self.preview.last_mesh = Instant::now();
+            self.preview.redraw = true;
+        }
+        if self.preview.lines_dirty {
+            let lv = self.line_vertices();
+            let g = self.preview.gpu.as_mut().unwrap();
+            g.lbuf = (!lv.is_empty()).then(|| (device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("preview-lines"), contents: bytemuck::cast_slice(&lv), usage: wgpu::BufferUsages::VERTEX }), lv.len() as u32));
+            self.preview.lines_dirty = false;
+            self.preview.redraw = true;
+        }
+    }
+
+    /// Draw the level from `cam` into `view` (COLOUR format, `px` pixels).
+    fn draw_view(&self, device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView, px: [u32; 2], cam: Cam, lines: bool, haze: bool) {
+        let Some(g) = self.preview.gpu.as_ref() else { return };
+        let u = Uniforms { vp: cam.matrix(px[0] as f32 / px[1] as f32), eye: [cam.pos[0], cam.pos[1], cam.pos[2], 1.0], haze: [24.0, 48.0, if haze { 1.0 } else { 0.0 }, 0.0] };
+        queue.write_buffer(&g.uniforms, 0, bytemuck::bytes_of(&u));
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("preview-depth"),
+            size: wgpu::Extent3d { width: px[0], height: px[1], depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let dv = depth.create_view(&Default::default());
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("preview") });
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("preview"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(g.clear), store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &dv, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }), stencil_ops: None }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if let (Some(bind), Some((vb, n))) = (&g.bind, &g.vbuf) {
+                pass.set_pipeline(&g.pipeline);
+                pass.set_bind_group(0, bind, &[]);
+                pass.set_vertex_buffer(0, vb.slice(..));
+                pass.draw(0..*n, 0..1);
+                if let (true, Some((lb, ln))) = (lines, &g.lbuf) {
+                    pass.set_pipeline(&g.lines);
+                    pass.set_vertex_buffer(0, lb.slice(..));
+                    pass.draw(0..*ln, 0..1);
+                }
+            }
+        }
+        queue.submit([enc.finish()]);
+    }
+
+    /// Render the level from `cam` at `w`×`h` pixels and read it back as RGBA (for MCP).
+    pub(super) fn snapshot_3d(&mut self, cam: Cam, w: u32, h: u32, lines: bool, haze: bool) -> Result<Vec<u8>, String> {
+        let (device, queue) = crate::gpu::device()?;
+        self.prepare_gpu(&device, &queue, false);
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("snapshot"),
+            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: COLOUR,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        self.draw_view(&device, &queue, &view, [w, h], cam, lines, haze);
+        let bpr = (w * 4).div_ceil(256) * 256;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("snapshot-read"), size: (bpr * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+        let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("snapshot") });
+        enc.copy_texture_to_buffer(tex.as_image_copy(), wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) } }, wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
+        queue.submit([enc.finish()]);
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
+        let data = buf.slice(..).get_mapped_range().map(|v| v.to_vec()).unwrap_or_default();
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h as usize {
+            rgba.extend_from_slice(&data[y * bpr as usize..y * bpr as usize + w as usize * 4]);
+        }
+        // the window's preview must redraw its own target afterwards
+        self.preview.redraw = true;
+        Ok(rgba)
+    }
+
     pub(super) fn preview_ui(&mut self, ui: &mut egui::Ui) {
         let Some(rs) = crate::gpu::state() else {
             ui.centered_and_justified(|ui| ui.label("The 3D preview needs the wgpu renderer."));
@@ -342,31 +444,9 @@ impl LevelDoc {
             self.camera_to_map_view();
         }
         let (device, queue) = (&rs.device, &rs.queue);
-        if self.preview.gpu.is_none() {
-            self.preview.gpu = Some(Gpu::new(device));
-        }
-        if self.preview.set != Some(self.look.set) {
-            self.upload_look(device, queue);
-            self.preview.redraw = true;
-        }
-        // rebuild the mesh after edits (at most 8 times a second while painting)
-        if self.preview.mesh_dirty && self.preview.last_mesh.elapsed() > Duration::from_millis(120) {
-            let verts = build_mesh(&self.level, &MeshOpts { shading: true, flat: None });
-            let g = self.preview.gpu.as_mut().unwrap();
-            g.vbuf = Some((device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("preview-mesh"), contents: bytemuck::cast_slice(&verts), usage: wgpu::BufferUsages::VERTEX }), verts.len() as u32));
-            self.preview.mesh_dirty = false;
-            self.preview.lines_dirty = true;
-            self.preview.last_mesh = Instant::now();
-            self.preview.redraw = true;
-        } else if self.preview.mesh_dirty {
+        self.prepare_gpu(device, queue, true);
+        if self.preview.mesh_dirty {
             ui.ctx().request_repaint_after(Duration::from_millis(130));
-        }
-        if self.preview.lines_dirty {
-            let lv = self.line_vertices();
-            let g = self.preview.gpu.as_mut().unwrap();
-            g.lbuf = (!lv.is_empty()).then(|| (device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label: Some("preview-lines"), contents: bytemuck::cast_slice(&lv), usage: wgpu::BufferUsages::VERTEX }), lv.len() as u32));
-            self.preview.lines_dirty = false;
-            self.preview.redraw = true;
         }
 
         // toolbar
@@ -408,46 +488,12 @@ impl LevelDoc {
             self.preview.redraw = true;
         }
         if self.preview.redraw {
-            let cam = self.preview.cam.unwrap();
-            let u = Uniforms { vp: cam.matrix(px[0] as f32 / px[1] as f32), eye: [cam.pos[0], cam.pos[1], cam.pos[2], 1.0], haze: [24.0, 48.0, if self.preview.haze { 1.0 } else { 0.0 }, 0.0] };
-            queue.write_buffer(&g.uniforms, 0, bytemuck::bytes_of(&u));
-            let depth = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("preview-depth"),
-                size: wgpu::Extent3d { width: px[0], height: px[1], depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DEPTH,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let dv = depth.create_view(&Default::default());
-            let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("preview") });
-            {
-                let (_, view, _) = g.target.as_ref().unwrap();
-                let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("preview"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(g.clear), store: wgpu::StoreOp::Store } })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment { view: &dv, depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }), stencil_ops: None }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                if let (Some(bind), Some((vb, n))) = (&g.bind, &g.vbuf) {
-                    pass.set_pipeline(&g.pipeline);
-                    pass.set_bind_group(0, bind, &[]);
-                    pass.set_vertex_buffer(0, vb.slice(..));
-                    pass.draw(0..*n, 0..1);
-                    if let (true, Some((lb, ln))) = (self.preview.show_lines, &g.lbuf) {
-                        pass.set_pipeline(&g.lines);
-                        pass.set_vertex_buffer(0, lb.slice(..));
-                        pass.draw(0..*ln, 0..1);
-                    }
-                }
-            }
-            queue.submit([enc.finish()]);
+            let (cam, lines, haze) = (self.preview.cam.unwrap(), self.preview.show_lines, self.preview.haze);
+            let view = &self.preview.gpu.as_ref().unwrap().target.as_ref().unwrap().1;
+            self.draw_view(device, queue, view, px, cam, lines, haze);
             self.preview.redraw = false;
         }
+        let g = self.preview.gpu.as_ref().unwrap();
         if let Some(id) = g.tex_id {
             ui.painter().image(id, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         }
