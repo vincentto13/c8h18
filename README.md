@@ -194,6 +194,11 @@ game), show the waveform, export a sample as WAV, a tune as XMIDI or rendered to
 sample from any PCM WAV (converted to 8-bit mono, in all three 8-bit formats at once) and a tune
 from an XMIDI file.
 
+**Explosion rings** (SRCH0-0) show the 32 × 32 grid of rings the big and massive explosions spread
+over, with each ring's walk order, start cell and unreached cells; paint cells into rings, move
+start cells, regenerate the circles (identical to the shipped grid except 16 hand-placed cells) and
+play the spread of either explosion. Only rings 0–5 are used by the game.
+
 Saving writes unpacked files (the game reads both; sheets also get their `.TAB`); originals in the
 data folder are never overwritten (Save asks for a new name). **Test in game** (button or ⌘R)
 writes the active file and every other open file with changes into a temporary override folder and

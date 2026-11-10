@@ -6,6 +6,7 @@ pub mod lang;
 pub mod level;
 pub mod palette;
 pub mod pixels;
+pub mod search;
 pub mod sound;
 pub mod table;
 pub mod viewer;
@@ -65,6 +66,7 @@ pub fn open(path: PathBuf, kind: Kind, rel: String) -> Result<Box<dyn Document>,
         Kind::Strings => Box::new(lang::LangDoc::open(path, rel)?),
         Kind::ColourTable => Box::new(table::TableDoc::open(path, rel)?),
         Kind::Sound => Box::new(sound::SoundDoc::open(path, rel)?),
+        Kind::SearchRings => Box::new(search::SearchDoc::open(path, rel)?),
         Kind::TerrainTextures | Kind::Sky | Kind::Image | Kind::ModelTextures | Kind::Sprites | Kind::Font | Kind::Billboards => Box::new(image::ImageDoc::open(path, kind, rel)?),
         _ => Box::new(viewer::Viewer::open(path, kind, rel)?),
     })

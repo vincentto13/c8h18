@@ -18,6 +18,7 @@ pub enum Kind {
     Model,
     Sound,
     Strings,
+    SearchRings,
     Other,
 }
 
@@ -37,6 +38,7 @@ impl Kind {
             Kind::Model => "Models",
             Kind::Sound => "Sound and music",
             Kind::Strings => "Languages",
+            Kind::SearchRings => "Explosion rings",
             Kind::Other => "Other",
         }
     }
@@ -69,6 +71,7 @@ impl Kind {
             "hspr" | "mspr" | "logo" | "panel" | "point" | "mini" | "track" => Kind::Sprites,
             "oscr" | "onet" | "title" | "puzzle" => Kind::Image,
             "tmaps" => Kind::Billboards,
+            "srch" => Kind::SearchRings,
             _ => Kind::Other,
         }
     }
@@ -129,6 +132,7 @@ mod tests {
         assert_eq!(Kind::of("SOUND/MUSIC.DAT"), Kind::Sound);
         assert_eq!(Kind::of("SOUND/SB16.DIG"), Kind::Other);
         assert_eq!(Kind::of("DATA/TMAPS.DAT"), Kind::Billboards);
+        assert_eq!(Kind::of("DATA/SRCH0-0.DAT"), Kind::SearchRings);
         assert_eq!(Kind::of("DATA/OSCR0-1.DAT"), Kind::Image);
         assert_eq!(Kind::of("OBJECTS/DATA/TEX0-0.DAT"), Kind::ModelTextures);
         assert_eq!(Kind::of("OBJECTS/DATA/CAR.DAT"), Kind::Model);

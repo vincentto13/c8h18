@@ -11,3 +11,4 @@ pub mod level;
 pub mod tmaps;
 pub mod config;
 pub mod strings;
+pub mod search;

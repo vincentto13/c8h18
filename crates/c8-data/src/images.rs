@@ -238,46 +238,9 @@ impl TexAtlas {
     }
 }
 
-/// Search rings (spec 01 §10).
+/// Search rings (spec 01 §10), as offsets from the centre in walk order; see [`crate::search`].
 pub fn load_search_rings() -> Result<Vec<Vec<(i32, i32)>>, String> {
-    let g = load("data/srch0-0.dat")?;
-    let mut grid: Vec<i8> = g.iter().map(|&b| b as i8).collect();
-    grid.resize(1024, -2);
-    let dirs = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
-    let mut rings = Vec::new();
-    let mut centre = (15i32, 15i32);
-    for k in 0..16i32 {
-        let Some(start) = grid.iter().position(|&b| b as i32 == k) else { break };
-        let (mut cx, mut cy) = ((start % 32) as i32, (start / 32) as i32);
-        if k == 0 {
-            centre = (cx, cy);
-        }
-        let mut ring = vec![(cx - centre.0, cy - centre.1)];
-        grid[start] = -1;
-        let mut base = 0usize;
-        'outer: loop {
-            for d in [2usize, 0, 1, 3, 4, 5, 6, 7] {
-                let (dx, dy) = dirs[(d + base) & 7];
-                let (nx, ny) = (cx + dx, cy + dy);
-                if nx < 0 || ny < 0 || nx >= 32 || ny >= 32 {
-                    continue;
-                }
-                let idx = (ny * 32 + nx) as usize;
-                let b = grid[idx];
-                if b >= 0 && (b as i32 & 15) == k {
-                    base = (base + d) & 6;
-                    ring.push((nx - centre.0, ny - centre.1));
-                    grid[idx] = -1;
-                    cx = nx;
-                    cy = ny;
-                    continue 'outer;
-                }
-            }
-            break;
-        }
-        rings.push(ring);
-    }
-    Ok(rings)
+    Ok(crate::search::Rings::build(&load("data/srch0-0.dat")?).offsets())
 }
 
 #[cfg(test)]
