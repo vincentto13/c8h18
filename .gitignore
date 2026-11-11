@@ -7,3 +7,4 @@
 # written by the game when a folder package is run (`--asset assets/custom`)
 /assets/*/save/
 *.c8pak
+/dist

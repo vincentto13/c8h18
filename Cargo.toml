@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "xtask"]
 # plain `cargo build` / `cargo run` / `cargo test` work on the game, as before the split
 default-members = ["crates/c8-game"]
 resolver = "3"

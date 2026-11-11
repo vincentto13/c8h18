@@ -1,0 +1,3 @@
+[alias]
+# release tooling: `cargo xtask dist`, `cargo xtask notices` (see xtask/src/main.rs)
+xtask = "run --quiet --package xtask --"

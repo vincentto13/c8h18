@@ -24,12 +24,13 @@ A Cargo workspace with three crates:
 | `crates/c8-audio` | sound and music banks (read and write), WAV samples, XMIDI tunes (read and write), Standard MIDI conversion, the GTL timbre bank (read and write), the OPL3 music player and OGG music, shared by the game and the editor | |
 | `crates/c8-render` | the level mesh (floor quads and block faces), the model triangles and the vertex format, shared by the game's renderer and the editor's 3D views | |
 | `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
+| `xtask` | release tooling: `cargo xtask dist`, `cargo xtask notices` (see [Release](#release)) | |
 
 ## Build and run
 
 ```
 cargo build --release                # the game (the workspace's default member)
-./target/release/c8h18            # assets default to ./resources
+./target/release/c8h18               # from the repository: ./resources if it has DATA/, else ./assets/custom
 ./target/release/c8h18 --asset assets/custom    # our own assets (partial: track 1, fallbacks for the rest)
 cargo build --release --workspace    # game and editor
 cargo test --workspace               # all tests
@@ -42,7 +43,7 @@ Options:
 | `-s`, `/s`, `--silent` | no sound or music |
 | `--no-intro` | skip the intro movie (also skipped, with a warning, when `DATA/INTRO.DAT` is missing) |
 | `--speed N` | game speed in percent of the original 20 ticks/s (default 90; e.g. 100 = original, 80 = slower) |
-| `--asset <dir\|file.c8pak>` | the asset package: a folder in the original layout or a `.c8pak` bundle (see [Asset packages](#asset-packages)); default `resources`. `<path>`, `--data <path>` and `GAME_DATA=<path>` do the same |
+| `--asset <dir\|file.c8pak>` | the asset package: a folder in the original layout or a `.c8pak` bundle (see [Asset packages](#asset-packages) and [Which package](#which-package-and-where-saves-go) for the default). `<path>` and `--data <path>` do the same |
 | `--race N` / `--demo N` | debug: go straight to a race / demo race on track N |
 | `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
@@ -68,15 +69,39 @@ c8h18-edit --unpack custom.c8pak some/folder
 ./target/release/c8h18 --asset custom.c8pak
 ```
 
+### Which package, and where saves go
+
+The game (not the editor) takes the first of:
+
+1. `--asset <dir|file.c8pak>` (or a bare path) on the command line;
+2. the environment variable `C8H18_ASSET` or `GAME_DATA` (first one set);
+3. `package = <name>` in the user's settings file `<user dir>/settings.txt` (`key = value` lines,
+   `#` comments), naming a bundle `<name>.c8pak` or a folder `<name>` in `<user dir>/packages/`
+   (any letter case); a name that is not there prints a warning and the game goes on to 4;
+4. the shipped package `c8h18.c8pak`, looked up next to the executable, in `../Resources/` (the
+   macOS app bundle) and in `../share/c8h18/` (a Linux install);
+5. for development, in the current directory: `resources/` when it has a `DATA/` folder (the
+   original files), else `assets/custom/` (our own). So `cargo run` from the repository works as
+   before with the original files present, and with our own assets on a fresh clone;
+6. otherwise `resources/` as it is, with a warning (every file then falls back, see below).
+
+The user dir is `~/Library/Application Support/C8H18` on macOS, `%APPDATA%\C8H18` on Windows and
+`$XDG_DATA_HOME/c8h18` (default `~/.local/share/c8h18`) on Linux. To play another package, drop a
+`.c8pak` (or a folder) into `<user dir>/packages/` and write e.g. `package = mytracks` into
+`<user dir>/settings.txt`. `RUST_LOG=info` logs which package was chosen and why.
+
 **Saves.** Config, save games, key, pad and video settings (`config.dat`, `save00.dat`..,
-`keys.txt`, `pad.txt`, `video.txt`) go to `save/` inside a folder package, as before. A bundle is
-never written: its saves go to a per-user folder named after the bundle file,
-`~/Library/Application Support/c8h18/<bundle name>/save/` on macOS
-(`%APPDATA%\c8h18\<bundle name>\save\` on Windows, `$XDG_DATA_HOME/c8h18/<bundle name>/save/`,
-default `~/.local/share/...`, elsewhere). `C8H18_SAVE_DIR=<dir>` puts them into `<dir>` instead,
-for any package (handy for test runs that must not touch the package or the user folder). Running
-`--asset assets/custom` writes `assets/custom/save/`, which `.gitignore` excludes (as it does
-`*.c8pak`); `--pack` leaves `save/` out.
+`keys.txt`, `pad.txt`, `video.txt`) go to `<user dir>/save/<package name>/`, the package name being
+the bundle's file name without `.c8pak`, the folder's name, or the name in `settings.txt` (so the
+shipped package saves in `save/c8h18/`, `assets/custom` in `save/custom/`). A bundle is never
+written. Exception for package makers: a **folder given with `--asset`** keeps its saves in its own
+`save/`, as before (`--asset assets/custom` writes `assets/custom/save/`, which `.gitignore`
+excludes, as it does `*.c8pak`; `--pack` leaves `save/` out). `C8H18_SAVE_DIR=<dir>` puts
+them into `<dir>` instead, for any package (handy for test runs that must not touch the package
+or the user folder).
+
+When the save folder does not exist yet, the saves of earlier versions are copied into it from
+the package folder's own `save/` (the old files stay).
 
 ### Partial data sets
 
@@ -446,7 +471,7 @@ Resources: `docs://format` (units, layers, entity types, what a race needs), `le
 ## Our own assets
 
 `assets/custom/` is an asset package made from scratch, in the original layout, for
-`c8h18 --asset assets/custom` (or a bundle packed from it). What it lacks falls back as described
+`c8h18 --asset assets/custom` (or a bundle packed from it; the release ships it as `c8h18.c8pak`). What it lacks falls back as described
 in [Partial data sets](#partial-data-sets): at the time of writing the terrain textures, skies and
 colour tables of tracks 2–6 (`TEXTU0-*`, `SKY0-*`, `TABLE0-*`; track 1 has its own terrain textures
 and colour table, `SKY0-0` is being made), `INTRO` and tracks 2–6. `lang/` holds copies of the language files.
@@ -571,6 +596,59 @@ draws it. The game's name, **C8H18** (the formula of octane), is one parameter: 
 `cargo run --release --manifest-path artgen/Cargo.toml -- --title "NEW NAME"` (also `--tagline`),
 which redraws the logo and the splash. They are written by a local generator, `artgen/` (not in
 git; see its README).
+
+## Release
+
+`cargo xtask dist` makes the macOS release of the game (Apple silicon, macOS 11 or later; the
+editor is not part of it) in `dist/`:
+
+- builds `c8h18` with `--release --locked` for `aarch64-apple-darwin`;
+- packs `assets/custom` into `c8h18.c8pak` (leaving out `save/` folders and hidden files);
+- assembles `dist/C8H18.app` (bundle id `xyz.c8h18.game`, version from the workspace):
+  `Contents/MacOS/c8h18`, `Contents/Resources/` with `c8h18.c8pak`, `AppIcon.icns`, `COPYING`,
+  `ASSETS-LICENSE`, `THIRD-PARTY-NOTICES.txt` and `RUST-STD-COPYRIGHT.html`;
+- signs it ad hoc (`codesign --force --deep -s -`; `--sign <identity>` for a real identity, which
+  also turns on the hardened runtime);
+- writes `dist/C8H18-<version>-macos-arm64.dmg` (the app and a link to /Applications).
+
+Options: `--skip-build`, `--no-dmg`, `--platform macos|linux|windows`. Linux (a tar.gz with
+`bin/c8h18`, `share/c8h18/c8h18.c8pak`, a `.desktop` file and the icon) and Windows (a zip with
+`c8h18.exe` and `c8h18.c8pak` side by side) use the same package lookup and are stubbed with a
+"not yet" error. `cargo xtask pack <dir> <out.c8pak>` packs a folder the way the release does.
+
+An ad hoc signature is not a Developer ID: on another Mac, Gatekeeper refuses the downloaded app
+until it is allowed in System Settings → Privacy & Security (or with right-click → Open). The
+shipped package can be swapped: replace `C8H18.app/Contents/Resources/c8h18.c8pak` (this breaks
+the signature; re-sign with `codesign --force --deep -s - C8H18.app`), or better, put packages into
+the user dir and select them with `settings.txt` (see [Which
+package](#which-package-and-where-saves-go)).
+
+The app icon, `packaging/macos/AppIcon.icns`, is drawn by the local generator `artgen/`
+(`--icon <dir>`; not in git).
+
+## Credits and licences
+
+- **Code**: GPL-3.0-or-later, see [`COPYING`](COPYING) (the GNU General Public License version 3).
+- **Assets** (`assets/custom`, shipped as `c8h18.c8pak`): Creative Commons
+  Attribution-ShareAlike 4.0 (CC BY-SA 4.0), see
+  [`assets/custom/LICENSE.txt`](assets/custom/LICENSE.txt). The licence file travels inside the
+  package and also ships next to it as `ASSETS-LICENSE`; a replacement package should carry its
+  own `LICENSE.txt`. The original game's files (`resources/`) are not part of this project and
+  are never shipped.
+- **Rust crates**: the game is built from open-source crates (wgpu, winit, cpal, gilrs, glam,
+  zip, png, env_logger, log and their dependencies, all under permissive licences such as MIT,
+  Apache-2.0, Zlib, BSD and ISC). The full list for the game binary, with each crate's version,
+  licence, repository and licence texts (Apache NOTICE files included), is
+  `THIRD-PARTY-NOTICES.txt` in the release, generated by `cargo xtask notices` from the
+  dependency graph; the Rust standard library's copyright file ships next to it.
+- **Tools used to make the assets**: [Blender](https://www.blender.org) (models, renders of the
+  screens and the logo backdrops), Python 3 with numpy (Blender scripts), and the Rust toolchain
+  (all generators).
+- **Fonts, sounds and music** are synthesised from scratch by our own generators (`fontgen/`,
+  `soundgen/`, `musicgen/`): no third-party fonts, samples or sound fonts are used. The only
+  measurements taken from the original files are layout numbers: the font sheets' glyph widths,
+  heights and ink boxes (so text lays out as before) and the sound effects' loudness levels (so
+  the mix keeps its balance); the glyphs, waveforms, timbres and tunes are new.
 
 ## Debug automation
 
