@@ -90,12 +90,14 @@ impl<'a> SceneBuilder<'a> {
         [p[0], p[2], p[1]]
     }
 
-    pub fn model(&mut self, m: usize, pos: [f32; 3], yaw: f32, pitch: f32, roll: f32, shadow: bool, flicker: u32) {
+    /// `shadow`: the terrain height under the model (spec 08 §10: the shadow lies on the ground
+    /// point, columns ignored), or None for no shadow.
+    pub fn model(&mut self, m: usize, pos: [f32; 3], yaw: f32, pitch: f32, roll: f32, shadow: Option<f32>, flicker: u32) {
         if !self.in_range(pos) {
             return;
         }
-        if shadow {
-            self.shadow(pos);
+        if let Some(ground) = shadow {
+            self.shadow([pos[0], pos[1], ground]);
         }
         let rot = orient(yaw, pitch, roll);
         push_model(&mut self.opaque, &self.assets.models[m], &self.assets.atlas, Self::gp(pos), &rot, 1.0, flicker);
@@ -104,8 +106,6 @@ impl<'a> SceneBuilder<'a> {
     fn shadow(&mut self, pos: [f32; 3]) {
         let Some((tm, h, blend)) = sprite_def(178) else { return };
         let (Some(img), Some(&(u0, v0))) = (self.assets.tmaps.get(tm), self.tmap_pos.get(tm)) else { return };
-        let ground = pos[2];
-        let _ = ground;
         let hh = h / 2048.0;
         let ww = hh * img.w as f32 / img.h as f32;
         let (sy, cy) = rad(self.cam.yaw).sin_cos();
@@ -169,17 +169,18 @@ impl<'a> SceneBuilder<'a> {
 
 /// Add all things of the world to the scene.
 pub fn build_world(sb: &mut SceneBuilder, w: &World, ip: &Interp, hidden: Option<usize>) {
+    let gnd = |p: [f32; 3]| Some(w.lvl.terrain_height(p[0], p[1]));
     for (i, c) in w.crafts.iter().enumerate() {
         if !c.active || c.invis > 0 || Some(i) == hidden {
             continue;
         }
         let p = ip.p(c.prev_pos, c.pos);
         let v = [ip.a(c.prev_view[0], c.view[0]), c.prev_view[1] + (c.view[1] - c.prev_view[1]) * ip.alpha, c.prev_view[2] + (c.view[2] - c.prev_view[2]) * ip.alpha];
-        sb.model(craft_model(c.kind as usize, c.team as usize), p, v[0], v[1], v[2], true, w.frame);
+        sb.model(craft_model(c.kind as usize, c.team as usize), p, v[0], v[1], v[2], gnd(p), w.frame);
     }
     for t in &w.trucks {
         let p = ip.p(t.prev_pos, t.pos);
-        sb.model(MODEL_RECOV, p, ip.a(t.prev_yaw, t.yaw), 0.0, 0.0, true, w.frame);
+        sb.model(MODEL_RECOV, p, ip.a(t.prev_yaw, t.yaw), 0.0, 0.0, gnd(p), w.frame);
     }
     for t in &w.things {
         if !t.alive {
@@ -188,9 +189,9 @@ pub fn build_world(sb: &mut SceneBuilder, w: &World, ip: &Interp, hidden: Option
         let p = ip.p(t.prev_pos, t.pos);
         match t.kind {
             TK::Scenery { sub } => match sub {
-                6 | 7 => sb.model(MODEL_CONE0 + (sub - 6) as usize, p, t.yaw, t.pitch, 0.0, true, w.frame),
-                8..=10 => sb.model(MODEL_BAREL0 + (sub - 8) as usize, p, 0.0, 0.0, 0.0, true, w.frame),
-                0 => sb.model(9, p, 0.0, 0.0, 0.0, true, w.frame),
+                6 | 7 => sb.model(MODEL_CONE0 + (sub - 6) as usize, p, t.yaw, t.pitch, 0.0, gnd(p), w.frame),
+                8..=10 => sb.model(MODEL_BAREL0 + (sub - 8) as usize, p, 0.0, 0.0, 0.0, gnd(p), w.frame),
+                0 => sb.model(9, p, 0.0, 0.0, 0.0, gnd(p), w.frame),
                 1 => sb.sprite(4, p, 0),
                 _ => {}
             },
