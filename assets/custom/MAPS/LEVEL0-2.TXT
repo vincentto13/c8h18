@@ -1,0 +1,51 @@
+# C8H18 level addition (port addition, docs/spec/01-file-formats.md section 9.7)
+base 118 41 118 41 8
+base 117 42 119 42 8
+base 116 43 120 43 8
+base 115 44 121 44 8
+base 114 45 122 45 8
+base 113 46 123 46 8
+base 112 47 124 47 8
+base 111 48 125 48 8
+base 110 49 126 49 8
+base 109 50 127 50 8
+base 110 51 128 51 8
+base 111 52 129 52 8
+base 112 53 130 53 8
+base 113 54 129 54 8
+base 114 55 128 55 8
+base 115 56 127 56 8
+base 116 57 126 57 8
+base 117 58 125 58 8
+base 118 59 124 59 8
+base 119 60 123 60 8
+base 120 61 122 61 8
+base 121 62 121 62 8
+level 34 9.480907
+level 35 9.5
+level 36 9.5
+level 37 9.497847
+level 58 6.5
+level 59 6.5
+level 60 6.5
+level 61 6.5
+range 152 7.4 inf
+range 153 7.4 inf
+range 154 7.4 inf
+range 155 7.4 inf
+range 156 7.4 inf
+range 181 -inf 7.4
+range 182 -inf 7.4
+range 183 -inf 7.4
+range 184 -inf 7.4
+range 185 -inf 7.4
+range 266 7.4 inf
+range 267 7.4 inf
+range 268 7.4 inf
+range 269 7.4 inf
+range 270 7.4 inf
+range 299 -inf 7.4
+range 300 -inf 7.4
+range 301 -inf 7.4
+range 302 -inf 7.4
+range 303 -inf 7.4

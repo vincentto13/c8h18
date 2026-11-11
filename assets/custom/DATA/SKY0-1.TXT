@@ -1,0 +1,12 @@
+# Track 2 sky: an ashen, smoky overcast over the ruined works (made by skygen --sky 1).
+# SKY0-1.PNG is a cylindrical panorama: x = azimuth, y = elevation (spec 01 §4.1).
+repeat = 1
+azimuth = 0
+top = 90
+bottom = 0
+horizon_blend = 8
+# a dim, sickly sun low in the west-north-west, glowing through smoke
+sun = 292 9
+sun_size = 1.8
+sun_colour = 222 200 120
+glare = 0.45
