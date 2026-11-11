@@ -333,7 +333,11 @@ impl Game {
             Mode::Quit => return,
         }
         let bg = if use_bg { Some(&self.bg) } else { None };
-        self.gfx.render(scene.as_ref(), bg, &self.fg, self.bright);
+        if !self.gfx.render(scene.as_ref(), bg, &self.fg, self.bright) {
+            // no drawable (window hidden or occluded): there is no vsync wait to pace the
+            // loop, so don't spin; game time follows the wall clock, so nothing is lost
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
     }
 }
 

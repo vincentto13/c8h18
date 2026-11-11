@@ -772,7 +772,24 @@ impl Gfx {
     }
 
     /// Render one frame: optional 3D scene, background canvas (below 3D), foreground canvas, fade.
-    pub fn render(&mut self, scene: Option<&Scene>, bg: Option<&canvas::Canvas>, fg: &canvas::Canvas, fade: f32) {
+    /// Returns false when nothing was drawn (no surface texture and no pending screenshot).
+    pub fn render(&mut self, scene: Option<&Scene>, bg: Option<&canvas::Canvas>, fg: &canvas::Canvas, fade: f32) -> bool {
+        // Acquire the surface texture before queuing any upload. Without one (window hidden,
+        // occluded, display asleep or locked) and with no screenshot pending, return with
+        // nothing queued: queued writes live in staging memory until the next submit, so
+        // queuing them every frame without submitting leaks (wired) GPU memory.
+        // A pending screenshot is still taken: the frame is drawn into an offscreen texture.
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                self.surface.configure(&self.device, &self.config);
+                None
+            }
+            _ => None,
+        };
+        if frame.is_none() && self.shot.is_none() {
+            return false;
+        }
         self.upload_canvas(bg, fg);
         let (w, h) = self.size();
         let video = crate::video::get();
@@ -825,19 +842,6 @@ impl Gfx {
             self.queue.write_buffer(&self.dyn_buf, 0, bytemuck::cast_slice(&dyn_verts));
         }
 
-        // without a surface texture (window hidden, display asleep or locked) a pending screenshot
-        // is still taken: the frame is drawn into an offscreen texture and not presented
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                None
-            }
-            _ => None,
-        };
-        if frame.is_none() && self.shot.is_none() {
-            return;
-        }
         let target = match &frame {
             Some(f) => f.texture.clone(),
             None => self.device.create_texture(&wgpu::TextureDescriptor {
@@ -1006,6 +1010,7 @@ impl Gfx {
             self.window.pre_present_notify();
             self.queue.present(frame);
         }
+        true
     }
 }
 
