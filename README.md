@@ -369,5 +369,6 @@ c8h18-edit --xmi-to-midi TGAME1.XMI tune.mid               # for MuseScore, LMMS
 `C8H18_AUTO="frame:op:arg;..."` runs scripted input. The ops are `shot:<png path>`,
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
-screenshot tests. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
+screenshot tests. A `shot` is also taken when the window has no drawable surface (hidden, display asleep or
+locked): that frame is drawn offscreen. Frames then run unthrottled, so space the frame numbers widely. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
 30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected, `HIEDIT_VIEW=3d|split` with the 3D preview. `HIEDIT_SHOT_FRAMES=<n>` takes the screenshot after n frames; `HIEDIT_MCP_TOKEN` / `HIEDIT_MCP_PORT` fix the live MCP token and port (and keep the endpoint on with `HIEDIT_SHOT`), `HIEDIT_MCP_PANEL=1` opens the MCP panel.

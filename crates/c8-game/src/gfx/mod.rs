@@ -746,15 +746,33 @@ impl Gfx {
             self.queue.write_buffer(&self.dyn_buf, 0, bytemuck::cast_slice(&dyn_verts));
         }
 
+        // without a surface texture (window hidden, display asleep or locked) a pending screenshot
+        // is still taken: the frame is drawn into an offscreen texture and not presented
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
-                return;
+                None
             }
-            _ => return,
+            _ => None,
         };
-        let out_view = frame.texture.create_view(&Default::default());
+        if frame.is_none() && self.shot.is_none() {
+            return;
+        }
+        let target = match &frame {
+            Some(f) => f.texture.clone(),
+            None => self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("offscreen shot"),
+                size: wgpu::Extent3d { width: self.config.width, height: self.config.height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            }),
+        };
+        let out_view = target.create_view(&Default::default());
         let scene_view = self.scene_tex.create_view(&Default::default());
         // with ANTI-ALIASING the scene is drawn multisampled and resolved into the scene texture
         let aa = video.antialias && scene.is_some();
@@ -848,7 +866,7 @@ impl Gfx {
                 mapped_at_creation: false,
             });
             enc.copy_texture_to_buffer(
-                frame.texture.as_image_copy(),
+                target.as_image_copy(),
                 wgpu::TexelCopyBufferInfo { buffer: &buf, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpr), rows_per_image: Some(h) } },
                 wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             );
@@ -877,7 +895,9 @@ impl Gfx {
                 }
             }
         }
-        self.window.pre_present_notify();
-        self.queue.present(frame);
+        if let Some(frame) = frame {
+            self.window.pre_present_notify();
+            self.queue.present(frame);
+        }
     }
 }
