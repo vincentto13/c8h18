@@ -1561,6 +1561,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "log",
+ "png",
  "zip",
 ]
 

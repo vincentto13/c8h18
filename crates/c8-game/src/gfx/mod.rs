@@ -48,6 +48,8 @@ struct ScenePipes {
     sky: wgpu::RenderPipeline,
     world: wgpu::RenderPipeline,
     sprite: wgpu::RenderPipeline,
+    /// sun visibility from this sample count's depth buffer (into the 1x1 target)
+    sunvis: wgpu::RenderPipeline,
 }
 
 pub use c8_render::{Vertex, K_SPRITE};
@@ -122,6 +124,12 @@ struct Globals {
     misc: [f32; 4],
     /// texture filtering (1/0), 0, 0, 0
     opts: [f32; 4],
+    // port addition, true-colour sky and sun glare (see shader.wgsl)
+    sun: [f32; 4],
+    sun_col: [f32; 4],
+    tsky: [f32; 4],
+    tsky2: [f32; 4],
+    glare: [f32; 4],
 }
 
 pub struct Gfx {
@@ -171,10 +179,18 @@ pub struct Gfx {
     pub tmap_pos: Vec<(u32, u32)>,
     /// save the next presented frame as PNG to this path
     pub shot: Option<String>,
+    /// port addition: the true-colour sky's panorama and its placement (None = palette sky)
+    sky_true_tex: wgpu::Texture,
+    true_sky: Option<crate::data::truesky::SkyParams>,
+    /// 1x1: the visible share of the sun, written by the sun visibility pass
+    sun_vis_tex: wgpu::Texture,
+    vis_layout: wgpu::BindGroupLayout,
+    vis_layout_ms: wgpu::BindGroupLayout,
 }
 
 const SCENE_FMT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FMT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const SUN_VIS_FMT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 fn tex2d(device: &wgpu::Device, w: u32, h: u32, layers: u32, fmt: wgpu::TextureFormat, usage: wgpu::TextureUsages) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
@@ -251,6 +267,7 @@ impl Gfx {
                 },
                 tex_entry(8, ST::Float { filterable: true }, VD::D2),
                 tex_entry(9, ST::Float { filterable: true }, VD::D2Array),
+                tex_entry(10, ST::Float { filterable: true }, VD::D2),
                 tex_entry(12, ST::Float { filterable: false }, VD::D2),
                 wgpu::BindGroupLayoutEntry {
                     binding: 13,
@@ -262,8 +279,29 @@ impl Gfx {
         });
         let bind1_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
-            entries: &[tex_entry(0, ST::Float { filterable: false }, VD::D2), tex_entry(1, ST::Uint, VD::D2), tex_entry(2, ST::Uint, VD::D2)],
+            entries: &[
+                tex_entry(0, ST::Float { filterable: false }, VD::D2),
+                tex_entry(1, ST::Uint, VD::D2),
+                tex_entry(2, ST::Uint, VD::D2),
+                tex_entry(3, ST::Float { filterable: false }, VD::D2),
+            ],
         });
+        let depth_entry = |b: u32, multisampled: bool| wgpu::BindGroupLayoutEntry {
+            binding: b,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture { sample_type: ST::Depth, view_dimension: VD::D2, multisampled },
+            count: None,
+        };
+        let vis_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("sun vis"), entries: &[depth_entry(4, false)] });
+        let vis_layout_ms = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("sun vis ms"), entries: &[depth_entry(5, true)] });
+        let layout_vis = |l: &wgpu::BindGroupLayout| {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&bind0_layout), Some(l)],
+                immediate_size: 0,
+            })
+        };
+        let (layout_vis_ss, layout_vis_ms) = (layout_vis(&vis_layout), layout_vis(&vis_layout_ms));
         let layout0 = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
             bind_group_layouts: &[Some(&bind0_layout)],
@@ -344,8 +382,18 @@ impl Gfx {
                 cache: None,
             })
         };
-        let pipes = ScenePipes { sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, 1), world: world(false, 1), sprite: world(true, 1) };
-        let pipes_msaa = ScenePipes { sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, MSAA), world: world(false, MSAA), sprite: world(true, MSAA) };
+        let pipes = ScenePipes {
+            sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, 1),
+            world: world(false, 1),
+            sprite: world(true, 1),
+            sunvis: full_pipe("fs_sunvis", SUN_VIS_FMT, &layout_vis_ss, false, 1),
+        };
+        let pipes_msaa = ScenePipes {
+            sky: full_pipe("fs_sky", SCENE_FMT, &layout0, true, MSAA),
+            world: world(false, MSAA),
+            sprite: world(true, MSAA),
+            sunvis: full_pipe("fs_sunvis_ms", SUN_VIS_FMT, &layout_vis_ms, false, 1),
+        };
 
         use wgpu::TextureFormat as TF;
         use wgpu::TextureUsages as TU;
@@ -357,6 +405,8 @@ impl Gfx {
         let tmap_tex = tex2d(&device, 1024, 1024, 1, TF::Rg8Uint, sampled);
         let sky_tex = tex2d(&device, 256, 256, 1, TF::R8Uint, sampled);
         let sky_rgb_tex = tex2d(&device, 256, 256, 1, TF::Rgba8Unorm, sampled);
+        let sky_true_tex = tex2d(&device, 1, 1, 1, TF::Rgba8Unorm, sampled);
+        let sun_vis_tex = tex2d(&device, 1, 1, 1, SUN_VIS_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         let terrain_rgb_tex = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("terrain rgb"),
             size: wgpu::Extent3d { width: 64, height: 64, depth_or_array_layers: 256 },
@@ -384,7 +434,7 @@ impl Gfx {
         });
         let (w, h) = (config.width, config.height);
         let scene_tex = tex2d(&device, w, h, 1, SCENE_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
-        let depth_tex = tex2d(&device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT);
+        let depth_tex = tex2d(&device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         let bg_tex = tex2d(&device, 640, 480, 1, TF::R16Uint, sampled);
         let fg_tex = tex2d(&device, 640, 480, 1, TF::R16Uint, sampled);
         let globals_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -441,6 +491,11 @@ impl Gfx {
             dyn_cap,
             tmap_pos: Vec::new(),
             shot: None,
+            sky_true_tex,
+            true_sky: None,
+            sun_vis_tex,
+            vis_layout,
+            vis_layout_ms,
         };
         g.rebuild_bind0();
         g
@@ -470,6 +525,7 @@ impl Gfx {
                 wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::Sampler(&self.linear_sampler) },
                 wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(&v(&self.sky_rgb_tex)) },
                 wgpu::BindGroupEntry { binding: 9, resource: wgpu::BindingResource::TextureView(&terrain_rgb_view) },
+                wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(&v(&self.sky_true_tex)) },
                 wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(&v(&self.light_fit_tex)) },
                 wgpu::BindGroupEntry { binding: 13, resource: wgpu::BindingResource::Sampler(&self.aniso_sampler) },
             ],
@@ -511,7 +567,7 @@ impl Gfx {
         self.surface.configure(&self.device, &self.config);
         use wgpu::TextureUsages as TU;
         self.scene_tex = tex2d(&self.device, w, h, 1, SCENE_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
-        self.depth_tex = tex2d(&self.device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT);
+        self.depth_tex = tex2d(&self.device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         self.msaa = None;
     }
 
@@ -527,7 +583,7 @@ impl Gfx {
                     sample_count: MSAA,
                     dimension: wgpu::TextureDimension::D2,
                     format: fmt,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 })
             };
@@ -625,6 +681,25 @@ impl Gfx {
         self.sky_idx = data[..65536].to_vec();
         self.rgb_dirty = true;
     }
+    /// Port addition: the track's true-colour sky (spec 08 §6.1), drawn instead of the palette sky
+    /// while set; `None` goes back to the palette sky.
+    pub fn set_true_sky(&mut self, sky: Option<&crate::data::truesky::TrueSky>) {
+        match sky {
+            Some(t) => {
+                self.sky_true_tex = tex2d(&self.device, t.w, t.h, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+                self.write_tex(&self.sky_true_tex, &t.rgba, t.w, t.h, 0, 4);
+                self.true_sky = Some(t.params);
+            }
+            None => {
+                if self.true_sky.is_none() {
+                    return;
+                }
+                self.sky_true_tex = tex2d(&self.device, 1, 1, 1, wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST);
+                self.true_sky = None;
+            }
+        }
+        self.rebuild_bind0();
+    }
     pub fn set_model_atlas(&mut self, pix: &[u8], h: u32) {
         let h = h.min(768);
         self.write_tex(&self.atlas_tex, &pix[..(256 * h) as usize], 256, h, 0, 1);
@@ -702,6 +777,7 @@ impl Gfx {
         let (w, h) = self.size();
         let video = crate::video::get();
         let mut glob = Globals::default();
+        let mut sun_glare = false;
         glob.screen = [w as f32, h as f32, fg.w as f32, fg.h as f32];
         glob.misc = [fade.clamp(0.0, 1.0), bg.is_some() as u32 as f32, video.fog_models() as u32 as f32, video.smoothing as u32 as f32];
         glob.opts = [video.filtering as u32 as f32, 0.0, 0.0, 0.0];
@@ -720,6 +796,9 @@ impl Gfx {
             glob.proj = [focal / (w as f32 * 0.5), focal / (h as f32 * 0.5), near, far];
             glob.fog = [video.fog_start(), video.fog_end(), video.draw_radius(), 1.0];
             glob.sky = [s.camera.yaw / 65536.0, s.camera.pitch, s.camera.roll, s.sky as u32 as f32];
+            if let (Some(p), true) = (&self.true_sky, s.world && s.sky) {
+                sun_glare = true_sky_globals(&mut glob, p, (r, u, f), focal, (w, h), video.sun_glare);
+            }
         }
         self.queue.write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&glob));
 
@@ -827,6 +906,33 @@ impl Gfx {
             }
         }
         let v = |t: &wgpu::Texture| t.create_view(&Default::default());
+        if sun_glare {
+            // the visible share of the sun, from the depth buffer the scene was just drawn with
+            let (layout, binding) = if aa { (&self.vis_layout_ms, 5) } else { (&self.vis_layout, 4) };
+            let vis_bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout,
+                entries: &[wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(&depth_view) }],
+            });
+            let vis_view = v(&self.sun_vis_tex);
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("sun visibility"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &vis_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&pipes.sunvis);
+            pass.set_bind_group(0, self.bind0.as_ref().unwrap(), &[]);
+            pass.set_bind_group(1, &vis_bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
         let bind1 = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.bind1_layout,
@@ -834,6 +940,7 @@ impl Gfx {
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&scene_view) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&v(&self.bg_tex)) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&v(&self.fg_tex)) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&v(&self.sun_vis_tex)) },
             ],
         });
         {
@@ -900,4 +1007,43 @@ impl Gfx {
             self.queue.present(frame);
         }
     }
+}
+
+/// Port addition: fill the true-colour sky's globals for this frame (camera basis, focal length in
+/// pixels, window size). Returns whether the sun glare is to be drawn (sun in front of the camera,
+/// near enough to the screen, glare on), which needs the sun visibility pass.
+fn true_sky_globals(
+    glob: &mut Globals,
+    p: &crate::data::truesky::SkyParams,
+    (r, u, f): ([f32; 3], [f32; 3], [f32; 3]),
+    focal: f32,
+    (w, h): (u32, u32),
+    glare_on: bool,
+) -> bool {
+    let rad = |d: f32| d.to_radians();
+    glob.tsky = [p.repeat as f32, rad(p.top), rad(p.bottom), rad(p.azimuth)];
+    glob.tsky2 = [1.0, rad(p.horizon_blend), 0.0, 0.0];
+    let Some(sun) = p.sun else { return false };
+    let d = sun.direction();
+    let radius = rad(sun.size);
+    glob.sun = [d[0], d[1], d[2], 1.0];
+    glob.sun_col = [sun.colour[0] as f32 / 255.0, sun.colour[1] as f32 / 255.0, sun.colour[2] as f32 / 255.0, radius];
+    if !glare_on || sun.glare <= 0.0 {
+        return false;
+    }
+    let dot = |a: [f32; 3]| a[0] * d[0] + a[1] * d[1] + a[2] * d[2];
+    let (vx, vy, vz) = (dot(r), dot(u), dot(f));
+    if vz < 0.05 {
+        return false;
+    }
+    let (px, py) = (w as f32 * 0.5 + vx / vz * focal, h as f32 * 0.5 - vy / vz * focal);
+    // fade out from 75 % of the way to the edge to a little beyond it
+    let m = ((px / w as f32 - 0.5).abs() * 2.0).max((py / h as f32 - 0.5).abs() * 2.0);
+    let fade = ((1.2 - m) / 0.45).clamp(0.0, 1.0);
+    if fade <= 0.0 {
+        return false;
+    }
+    glob.tsky2[2] = sun.glare;
+    glob.glare = [px / w as f32, py / h as f32, fade, radius * focal];
+    true
 }

@@ -102,6 +102,7 @@ warning: missing asset DATA/SKY0-0.DAT: drawing a plain sky
 | `DATA/TABLE0-N.DAT` | a colour table computed from the palette, flat colours from the track's textures (`computing the colour table from the palette`) |
 | `DATA/TEXTU0-N.DAT` | placeholder textures: grey tiles with a grid, a little lighter or darker per texture id (`using generated placeholder textures`) |
 | `DATA/SKY0-N.DAT` | a vertical gradient from blue to the haze colour (`drawing a plain sky`) |
+| `DATA/SKY0-N.PNG` / `.TXT` (optional, [true-colour sky](#true-colour-skies)) | no warning when absent; an unreadable PNG or a bad sidecar warns and the palette sky `SKY0-N.DAT` is drawn (`using the palette sky DATA/SKY0-N.DAT`) |
 | `DATA/INTRO.DAT` | the intro is skipped, as with `--no-intro` (`skipping the intro movie`) |
 | `OBJECTS/DATA/<model>.DAT` | that model is drawn as nothing (`drawn as nothing`) |
 | `OBJECTS/DATA/TEX0-0.DAT/.TAB` | models get one plain grey texture (`models are drawn with a plain texture`) |
@@ -135,12 +136,61 @@ none of them changes the game itself:
 | ANTI-ALIASING | 4× multisampling of the 3D view | on |
 | SMOOTHING | filtered sky, sharp-bilinear scaling of the 640×480 menus and HUD (even pixel sizes at any window size) | on |
 | TEXTURE FILTERING | smooth textures on the ground, blocks, crafts and billboards, mipmapped and anisotropically filtered in the distance (no shimmer), and smooth light gradients instead of the 64 light steps | on |
+| SUN GLARE | with a [true-colour sky](#true-colour-skies) that has a sun: bloom around the sun, a warm veil and a faint lens-flare chain while the sun is in view and not hidden by terrain; no effect on the original skies | on |
 
 Texture filtering keeps the original colours: close up, the four nearest texels are each lit through
 the track's light table and then blended; in the distance, where texels are smaller than a pixel,
 the mipmapped colour copy is used with the light table applied as a fitted per-row colour transform
 (about 1 % mean difference). With VIEW DISTANCE at the first step and the other options off the
 picture matches the original.
+
+## True-colour skies
+
+Port addition (spec 01 §4.1, spec 08 §6.1): besides its 256-colour sky `DATA/SKY0-N.DAT`, track
+N + 1 may have a sky in true colour, `DATA/SKY0-N.PNG`, with a small text sidecar
+`DATA/SKY0-N.TXT`. When the PNG is there it replaces the palette sky; without it the track looks
+exactly as before. Both are read through the asset package, so they work in bundles too.
+
+The PNG is a **cylindrical panorama** (8-bit RGB or RGBA, or any PNG the decoder can expand; up to
+8192 × 8192): x runs around the horizon, y from the top elevation down to the bottom one, both
+linearly. It is seen in true perspective, so a 360° image (e.g. 4096 × 1024 for 0..90°) never
+repeats. Near the horizon it fades into the haze colour of the track's colour table (light row 0),
+the colour the terrain fades into, so sky and fog meet without a seam; below the horizon it is
+that haze colour.
+
+The sidecar holds `key = value` lines (`#` comments; all keys optional):
+
+| Key | Meaning | Default |
+|---|---|---|
+| `repeat` | copies of the image around a full turn (1..16) | 1 |
+| `azimuth` | azimuth of the image's left edge, degrees clockwise from map north (map north = decreasing row = camera yaw 0; 90 = east, increasing x) | 0 |
+| `top` / `bottom` | elevation (degrees) of the top and bottom edges | 90 / 0 |
+| `horizon_blend` | degrees above the horizon over which the sky fades into the haze colour (0 = a hard edge) | 4 |
+| `sun` | sun azimuth and elevation in degrees; without this line there is no sun | none |
+| `sun_size` | angular radius of the sun disk, degrees (0.1..10) | 1 |
+| `sun_colour` | sun colour, 8-bit RGB | 255 240 215 |
+| `glare` | strength of the sun glare (0..4, 0 = none) | 1 |
+
+```
+# DATA/SKY0-0.TXT of assets/custom
+repeat = 1
+azimuth = 0
+top = 90
+bottom = 0
+horizon_blend = 5
+sun = 248 13
+sun_size = 1.3
+sun_colour = 255 232 196
+glare = 1
+```
+
+The sun is drawn by the game as a disk with a soft corona on top of the panorama (so the image
+itself should not contain a sun disk). With SUN GLARE on (display options) and the sun in view, it
+adds a bloom, a warm veil towards the sun and a few faint lens-flare ghosts along the line from the
+sun through the screen centre, fading out as the sun nears the screen edge. A small disc around the
+sun is tested against the depth buffer each frame, so the glare fades smoothly as the sun slips
+behind a canyon bank, a block or a craft and is gone while it is hidden. The glare is drawn on the
+3D view only, below the HUD, and costs one tiny extra pass; it changes nothing in the game itself.
 
 ## Languages
 
@@ -378,8 +428,8 @@ Resources: `docs://format` (units, layers, entity types, what a race needs), `le
 `assets/custom/` is an asset package made from scratch, in the original layout, for
 `c8h18 --asset assets/custom` (or a bundle packed from it). What it lacks falls back as described
 in [Partial data sets](#partial-data-sets): at the time of writing the terrain textures, skies and
-colour tables of the tracks (`TEXTU0-*`, `SKY0-*`, `TABLE0-*`; a palette and `TABLE0-0` are being
-made), the screens (`LOGO0-*`, `OSCR0-*`, `ONET0-*`, `TITLE`, `PUZZLE`), the billboards (`TMAPS`),
+colour tables of tracks 2–6 (`TEXTU0-*`, `SKY0-*`, `TABLE0-*`; track 1 has its own terrain textures
+and colour table, `SKY0-0` is being made), the screens (`LOGO0-*`, `OSCR0-*`, `ONET0-*`, `TITLE`, `PUZZLE`), the billboards (`TMAPS`),
 `SRCH0-0`, `INTRO` and tracks 2–6. `lang/` holds copies of the language files.
 
 ### Fonts
@@ -458,9 +508,32 @@ c8h18-edit --xmi-to-midi TGAME1.XMI tune.mid               # for MuseScore, LMMS
 circuit with a start grid, a banked sweeper, a crest, a chicane, a dip, a hairpin and a pit straight,
 with checkpoints, computer-driver waypoints, charger pads, collectables and props. It passes the
 editor's checks and the computer drivers complete laps. The package also holds its minimaps
-(`DATA/TRACK0-0/1`) and its carousel model (`OBJECTS/DATA/TRACK0-0.DAT`). Until our own terrain
-textures, sky and colour table exist it races with the fallbacks. It is written by a local generator, `mapgen/` (not
+(`DATA/TRACK0-0/1`) and its carousel model (`OBJECTS/DATA/TRACK0-0.DAT`). It races on our own
+terrain textures and colour table (see below). It is written by a local generator, `mapgen/` (not
 in git; see its README).
+
+### Terrain textures
+
+`assets/custom/DATA/TEXTU0-0.DAT` holds track 1's 256 terrain textures, generated procedurally from
+scratch: sandy desert ground with gravel, clay and scrub patches (and transition tiles between
+them), sand verges, sandstone banks with strata, asphalt with yellow edge lines, the chequered
+start/finish line and grid boxes, charger pads in the HUD minimap's colours, corner chevrons,
+barrier and billboard faces (with an invented brand), and a general set for levels made in the
+editor (rock, sand, concrete, metal, grates, walls, stripes, signs, road markings, water). Track 1's
+colour table `DATA/TABLE0-0.DAT` takes its flat colours (TEXTURE MAPPING off) from them. They are
+written by a local generator, `terraingen/` (not in git; see its README, which lists the ids).
+
+### Sky
+
+`assets/custom/DATA` holds track 1's sky: a warm late-afternoon sky over the canyon, a deep blue
+zenith fading to a pale warm horizon, soft cumulus with sunlit edges and thin high cirrus, and a
+low west-south-west sun (azimuth 248°, elevation 13°). It comes as a [true-colour
+sky](#true-colour-skies) (`SKY0-0.PNG`, a 4096 × 1024 panorama, with `SKY0-0.TXT`) and as the
+classic 256-colour `SKY0-0.DAT` resampled from it and dithered to our palette, for tools and as the
+fallback. The sun stays behind or beside the crafts on the start straight and along the top, and
+comes into view in the hairpin, on the infield's westward stretch and along the bottom, where it
+drops behind the canyon banks in the turns. It is written by a local generator, `skygen/` (not in
+git; see its README).
 
 ### HUD and icons
 

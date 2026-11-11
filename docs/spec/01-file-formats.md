@@ -152,6 +152,26 @@ coordinates); the files hold real pixel sizes.
 | `DATA/TEXTU0-N.DAT` | RNC | 1048576 | 256 terrain textures of 64 × 64: one 64-pixel-wide image of 16384 rows; texture i is rows 64i .. 64i + 63 |
 | `DATA/PUZZLE.DAT` | no | 10752 | 112 × 96 picture (the studio logo) for the sliding puzzle; tile (col, row) is the 28 × 24 block at (28·col, 24·row) |
 
+### 4.1 True-colour skies — `DATA/SKY0-N.PNG`, `DATA/SKY0-N.TXT` (port addition)
+
+Not part of the original set. Optional per track; when `SKY0-N.PNG` exists it replaces `SKY0-N.DAT` in the
+port (chapter 08 §6.1).
+
+- `SKY0-N.PNG`: a PNG of any colour type and bit depth (expanded to 8-bit RGBA; alpha ignored), 2 × 2 up to
+  8192 × 8192. A cylindrical panorama: column x covers azimuth `left + x / width × 360° / repeat`, row y elevation
+  from `top` (top edge of row 0) to `bottom` (bottom edge of the last row), both linear.
+- `SKY0-N.TXT` (optional): UTF-8 text, one `key = value` per line, `#` starts a comment, keys in any letter case,
+  numbers separated by spaces or commas. Keys: `repeat` (whole number 1..16, default 1), `azimuth` (left edge,
+  degrees clockwise from map north = decreasing row, default 0), `top` / `bottom` (degrees, −90..90, bottom below
+  top, default 90 / 0), `horizon_blend` (degrees 0..45, default 4), `sun` (azimuth and elevation in degrees,
+  elevation −10..90; no line = no sun), `sun_size` (angular radius in degrees 0.1..10, default 1), `sun_colour`
+  (three values 0..255, default 255 240 215; `sun_color` also accepted), `glare` (0..4, default 1). Unknown keys,
+  malformed or out-of-range values make the file unusable.
+
+A missing PNG is the normal case (no warning). An unreadable PNG or an unusable sidecar prints one warning
+(`warning: unusable asset DATA/SKY0-0.TXT (line 3: unknown key `x`): using the palette sky DATA/SKY0-0.DAT`) and
+the palette sky is used.
+
 ## 5. Colour tables — `DATA/TABLE0-N.DAT`
 
 RNC, unpacked exactly **83968 bytes = 328 rows × 256**; every row is a 256-entry remap `out = row[in]`. Track t uses
@@ -696,6 +716,8 @@ first) and completes the header.
   tables computed from the palette (§5: rows 0..31 fade towards the haze, row 32 the identity, rows 33..63 darken,
   nearest palette colours; the blend table; flat colours averaged from the textures). Without `PUZZLE.DAT` the
   sliding puzzle is disabled, without `TMAPS` no billboards are drawn.
+- Port addition: optional true-colour skies `DATA/SKY0-N.PNG` with a sidecar `DATA/SKY0-N.TXT` (§4.1), used instead
+  of `SKY0-N.DAT` when present.
 - The port's fresh config (when no file exists) follows the original's defaults except: the stereo flag is set (the
   original's fresh config is mono), the track records start at 0 instead of 9999 / "C8H18" (the port treats 0 as
   "no record"), and the second score table is left zero.

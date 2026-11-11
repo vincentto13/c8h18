@@ -11,6 +11,12 @@ struct Globals {
     screen: vec4<f32>,   // width, height, canvas_w, canvas_h
     misc: vec4<f32>,     // fade 0..1, bg_enabled, fog models (1/0), smoothing (1/0)
     opts: vec4<f32>,     // texture filtering (1/0), 0, 0, 0
+    // port addition, true-colour sky (spec 08 §6.1); all zero without one
+    sun: vec4<f32>,      // world direction towards the sun, sun present (1/0)
+    sun_col: vec4<f32>,  // sun colour 0..1, angular radius (radians)
+    tsky: vec4<f32>,     // repeat, top, bottom (radians), azimuth of the left edge (radians)
+    tsky2: vec4<f32>,    // true sky (1/0), horizon blend (radians), glare strength (0 = off), 0
+    glare: vec4<f32>,    // sun position (uv), edge fade 0..1 (0 = no glare), sun radius in pixels
 };
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -23,6 +29,7 @@ struct Globals {
 @group(0) @binding(7) var lin_samp: sampler;               // linear, repeat
 @group(0) @binding(8) var sky_rgb: texture_2d<f32>;        // the sky in colour (SMOOTHING)
 // TEXTURE FILTERING: colour copies of the textures and the light rows as colour transforms
+@group(0) @binding(10) var sky_true: texture_2d<f32>;        // true-colour panorama (port addition)
 @group(0) @binding(9) var terrain_rgb: texture_2d_array<f32>; // 64x64x256, mipmapped
 @group(0) @binding(12) var light_fit: texture_2d<f32>;        // 64x2: row r = (a at y 0, b at y 1)
 @group(0) @binding(13) var aniso_samp: sampler;               // trilinear, anisotropic, clamp
@@ -244,11 +251,51 @@ fn vs_full(@builtin(vertex_index) vi: u32) -> FOut {
 
 const PI: f32 = 3.14159265;
 
+// The view ray through a fullscreen uv, in world axes (x, height, row).
+fn view_ray(uv: vec2<f32>) -> vec3<f32> {
+    let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+    return normalize(g.right.xyz * (ndc.x / g.proj.x) + g.up.xyz * (ndc.y / g.proj.y) + g.fwd.xyz);
+}
+
+// Port addition (spec 08 §6.1): the true-colour sky, a cylindrical panorama seen in perspective,
+// faded into the light table's haze colour at the horizon, with the sun disk and its corona.
+fn true_sky(uv: vec2<f32>) -> vec3<f32> {
+    let d = view_ray(uv);
+    let el = asin(clamp(d.y, -1.0, 1.0));
+    let az = atan2(d.x, -d.z);
+    let dims = vec2<f32>(textureDimensions(sky_true));
+    let u = fract((az - g.tsky.w) / (2.0 * PI) * g.tsky.x);
+    let v = clamp((g.tsky.y - el) / (g.tsky.y - g.tsky.z), 0.5 / dims.y, 1.0 - 0.5 / dims.y);
+    var col = textureSampleLevel(sky_true, lin_samp, vec2<f32>(u, v), 0.0).rgb;
+    let haze = pal(light(0, 255u)).rgb;
+    var t = 0.0;
+    if (g.tsky2.y > 0.0) {
+        t = smoothstep(0.0, g.tsky2.y, el);
+    } else if (el > 0.0) {
+        t = 1.0;
+    }
+    col = mix(haze, col, t);
+    if (g.sun.w > 0.5) {
+        let r = g.sun_col.w;
+        let a = length(d - g.sun.xyz); // chord, the angle for small angles
+        let corona = exp(-a / (r * 2.2)) * 0.45 + exp(-a / (r * 9.0)) * 0.10;
+        col = col + g.sun_col.rgb * corona * (1.0 - col * 0.5);
+        let px = r * g.proj.y * g.screen.y * 0.5; // radius in pixels
+        let disk = clamp((r - a) / r * px + 0.5, 0.0, 1.0);
+        // the disk: the sun colour pushed to near white, never darker than the corona around it
+        col = mix(col, max(col, mix(g.sun_col.rgb, vec3<f32>(1.0), 0.85)), disk);
+    }
+    return min(col, vec3<f32>(1.0));
+}
+
 // Sky (spec 08 §6), generalised to any aspect: 256 texels span the width of a 4:3 view of this height.
 @fragment
 fn fs_sky(i: FOut) -> @location(0) vec4<f32> {
     if (g.sky.w < 0.5) {
         return vec4<f32>(pal(light(0, 255u)).rgb, 1.0);
+    }
+    if (g.tsky2.x > 0.5) {
+        return vec4<f32>(true_sky(i.uv), 1.0);
     }
     let W = g.screen.x;
     let H = g.screen.y;
@@ -279,6 +326,77 @@ fn fs_sky(i: FOut) -> @location(0) vec4<f32> {
 @group(1) @binding(0) var scene_tex: texture_2d<f32>;
 @group(1) @binding(1) var bg_tex: texture_2d<u32>;
 @group(1) @binding(2) var fg_tex: texture_2d<u32>;
+@group(1) @binding(3) var sun_vis: texture_2d<f32>;           // 1x1: visible part of the sun
+// the sun visibility pass reads the scene depth (single or multisampled)
+@group(1) @binding(4) var depth_ss: texture_depth_2d;
+@group(1) @binding(5) var depth_ms: texture_depth_multisampled_2d;
+
+// Sun visibility (port addition): the share of a small disc around the sun where the depth buffer
+// still holds the clear value (only the sky was drawn there). Rendered into a 1x1 target.
+const VIS_N: i32 = 8;
+// Sample k (0..VIS_N²) of the disc around the sun in pixels; w = 0 for grid points outside the disc.
+fn vis_point(k: i32) -> vec3<i32> {
+    let size = vec2<i32>(i32(g.screen.x), i32(g.screen.y));
+    let c = g.glare.xy * g.screen.xy;
+    let rad = max(g.glare.w * 1.6, 3.0);
+    let o = (vec2<f32>(f32(k % VIS_N), f32(k / VIS_N)) + 0.5) / f32(VIS_N) * 2.0 - 1.0;
+    let p = clamp(vec2<i32>(floor(c + o * rad)), vec2<i32>(0), size - 1);
+    return vec3<i32>(p, select(0, 1, dot(o, o) <= 1.0));
+}
+@fragment
+fn fs_sunvis(i: FOut) -> @location(0) vec4<f32> {
+    var seen = 0.0;
+    var total = 0.0;
+    for (var k = 0; k < VIS_N * VIS_N; k++) {
+        let p = vis_point(k);
+        if (p.z == 0) { continue; }
+        total += 1.0;
+        if (textureLoad(depth_ss, p.xy, 0) >= 1.0) { seen += 1.0; }
+    }
+    return vec4<f32>(seen / max(total, 1.0), 0.0, 0.0, 1.0);
+}
+@fragment
+fn fs_sunvis_ms(i: FOut) -> @location(0) vec4<f32> {
+    var seen = 0.0;
+    var total = 0.0;
+    for (var k = 0; k < VIS_N * VIS_N; k++) {
+        let p = vis_point(k);
+        if (p.z == 0) { continue; }
+        total += 1.0;
+        if (textureLoad(depth_ms, p.xy, 0) >= 1.0) { seen += 1.0; }
+    }
+    return vec4<f32>(seen / max(total, 1.0), 0.0, 0.0, 1.0);
+}
+
+// Sun glare (port addition): bloom around the sun, a veil towards it and a chain of lens-flare
+// ghosts along the line from the sun through the screen centre, scaled by the sun's visibility
+// and faded out towards the screen edge. Additive, on the 3D view only (below the HUD).
+fn soft_disc(p: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
+    let d = length(p - c) / r;
+    return clamp(1.0 - d * d, 0.0, 1.0);
+}
+fn sun_glare(uv: vec2<f32>) -> vec3<f32> {
+    let vis = textureLoad(sun_vis, vec2<i32>(0, 0), 0).r * g.glare.z;
+    if (vis <= 0.001) { return vec3<f32>(0.0); }
+    let asp = vec2<f32>(g.screen.x / g.screen.y, 1.0);
+    let p = uv * asp;
+    let s = g.glare.xy * asp;
+    let ctr = vec2<f32>(0.5) * asp;
+    let r = length(p - s);
+    // bloom (tight and wide) and a warm veil that grows towards the sun
+    var add = g.sun_col.rgb * (exp(-r * 40.0) * 0.40 + exp(-r * 9.0) * 0.10 + exp(-r * 2.2) * 0.05 + 0.01);
+    // ghosts: position along sun -> centre, radius, intensity, tint
+    let axis = ctr - s;
+    add += vec3<f32>(1.0, 0.75, 0.45) * soft_disc(p, s + axis * 0.45, 0.035) * 0.10;
+    add += vec3<f32>(0.55, 1.0, 0.6) * soft_disc(p, s + axis * 0.8, 0.06) * 0.06;
+    add += vec3<f32>(0.6, 0.7, 1.0) * soft_disc(p, s + axis * 1.3, 0.11) * 0.05;
+    add += vec3<f32>(1.0, 0.6, 0.85) * soft_disc(p, s + axis * 1.7, 0.025) * 0.10;
+    add += vec3<f32>(0.75, 0.85, 1.0) * soft_disc(p, s + axis * 2.15, 0.16) * 0.035;
+    // a faint ring around the centre
+    let ring = abs(length(p - (s + axis * 1.0)) - 0.28);
+    add += g.sun_col.rgb * clamp(1.0 - ring / 0.012, 0.0, 1.0) * 0.025;
+    return add * vis * g.tsky2.z;
+}
 
 // A canvas pixel as premultiplied colour: opaque a = 1, translucent a = 0.5, transparent a = 0.
 fn canvas_pm(t: texture_2d<u32>, p: vec2<i32>) -> vec4<f32> {
@@ -316,6 +434,9 @@ fn fs_composite(i: FOut) -> @location(0) vec4<f32> {
     let sp = vec2<i32>(floor(i.uv * vec2<f32>(textureDimensions(scene_tex))));
     let s = textureLoad(scene_tex, sp, 0);
     col = mix(col, s.rgb, s.a);
+    if (g.glare.z > 0.0) {
+        col = min(col + sun_glare(i.uv) * s.a, vec3<f32>(1.0));
+    }
     let f = canvas_layer(fg_tex, i.uv);
     col = col * (1.0 - f.a) + f.rgb;
     return vec4<f32>(col * g.misc.x, 1.0);

@@ -17,9 +17,11 @@ pub struct Video {
     /// TEXTURE FILTERING: filtered, mipmapped terrain / model / billboard textures with the light
     /// table applied as a fitted colour transform, and smooth light gradients
     pub filtering: bool,
+    /// SUN GLARE: bloom, lens flare and veil when a true-colour sky's sun is in view
+    pub sun_glare: bool,
 }
 
-const DEFAULT: Video = Video { view: 2, antialias: true, smoothing: true, filtering: true };
+const DEFAULT: Video = Video { view: 2, antialias: true, smoothing: true, filtering: true, sun_glare: true };
 
 static VIDEO: Mutex<Video> = Mutex::new(DEFAULT);
 
@@ -62,11 +64,12 @@ fn save(v: &Video) {
     }
     let onoff = |b: bool| if b { "on" } else { "off" };
     let t = format!(
-        "view_distance = {}\nantialias = {}\nsmoothing = {}\ntexture_filtering = {}\n",
+        "view_distance = {}\nantialias = {}\nsmoothing = {}\ntexture_filtering = {}\nsun_glare = {}\n",
         v.view,
         onoff(v.antialias),
         onoff(v.smoothing),
-        onoff(v.filtering)
+        onoff(v.filtering),
+        onoff(v.sun_glare)
     );
     let _ = std::fs::create_dir_all(crate::data::files::save_dir());
     if let Err(e) = std::fs::write(path(), t) {
@@ -84,6 +87,7 @@ fn parse(t: &str) -> Video {
             "antialias" => v.antialias = val == "on",
             "smoothing" => v.smoothing = val == "on",
             "texture_filtering" => v.filtering = val == "on",
+            "sun_glare" => v.sun_glare = val == "on",
             _ => {}
         }
     }
@@ -103,8 +107,9 @@ mod tests {
     #[test]
     fn parse_file() {
         assert_eq!(parse(""), DEFAULT);
-        let v = parse("view_distance = 0\nantialias = off\nsmoothing = off\ntexture_filtering = off\n");
-        assert_eq!(v, Video { view: 0, antialias: false, smoothing: false, filtering: false });
+        let v = parse("view_distance = 0\nantialias = off\nsmoothing = off\ntexture_filtering = off\nsun_glare = off\n");
+        assert_eq!(v, Video { view: 0, antialias: false, smoothing: false, filtering: false, sun_glare: false });
+        assert!(parse("antialias = off").sun_glare, "older files keep the glare on");
         assert_eq!(parse("view_distance = 9").view, VIEW_DISTANCES.len() - 1);
         assert_eq!(v.fog_end(), 16.0);
         assert_eq!(v.fog_start(), 12.0);

@@ -59,6 +59,7 @@ pub enum ValId {
     Antialias,
     Smoothing,
     Filtering,
+    SunGlare,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -92,6 +93,14 @@ fn onoff(lang: usize, n: usize, on: bool) -> Vec<u8> {
 /// A port addition's on/off item (label from the language files' named entries).
 fn named_onoff(lang: usize, key: &str, on: bool) -> Vec<u8> {
     let mut v = crate::data::strings::to_cp437(crate::data::strings::named(lang, key));
+    v.extend_from_slice(if on { b" d" } else { b" c" });
+    v
+}
+
+/// [`named_onoff`] with a built-in label for language files without the key.
+fn named_onoff_or(lang: usize, key: &str, default: &str, on: bool) -> Vec<u8> {
+    let name = crate::data::strings::named(lang, key);
+    let mut v = crate::data::strings::to_cp437(if name.is_empty() { default } else { name });
     v.extend_from_slice(if on { b" d" } else { b" c" });
     v
 }
@@ -173,6 +182,7 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             Item { adjustable: true, ..item(named_onoff(l, "antialiasing", video.antialias), Act::Value(ValId::Antialias)) },
             Item { adjustable: true, ..item(named_onoff(l, "smoothing", video.smoothing), Act::Value(ValId::Smoothing)) },
             Item { adjustable: true, ..item(named_onoff(l, "texture_filtering", video.filtering), Act::Value(ValId::Filtering)) },
+            Item { adjustable: true, ..item(named_onoff_or(l, "sun_glare", "SUN GLARE", video.sun_glare), Act::Value(ValId::SunGlare)) },
             item(st(l, 56), Act::Back),
         ],
         MenuId::Sound => vec![
@@ -257,6 +267,7 @@ fn value(v: ValId, d: Dir, ctx: &mut Ctx) {
         ValId::Antialias => crate::video::update(|v| v.antialias = !v.antialias),
         ValId::Smoothing => crate::video::update(|v| v.smoothing = !v.smoothing),
         ValId::Filtering => crate::video::update(|v| v.filtering = !v.filtering),
+        ValId::SunGlare => crate::video::update(|v| v.sun_glare = !v.sun_glare),
         ValId::Texture => {
             match d {
                 Dir::Left => {

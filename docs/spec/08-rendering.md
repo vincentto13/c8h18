@@ -329,6 +329,30 @@ texel = sky[(v >> 16 AND 255) × 256 + (u >> 16 AND 255)]
 The 256 × 256 image (`data/sky0-N`) wraps: its last rows lie just above the horizon and it repeats
 twice per turn.
 
+### 6.1 True-colour sky (port addition)
+
+Not in the original. When the track has `DATA/SKY0-N.PNG` (chapter 01 §4.1) it is drawn instead of
+the palette sky above; without it the sky is drawn exactly as above. Per pixel the view ray d (world
+axes x, height, row) gives the elevation asin(d.height) and the azimuth atan2(d.x, −d.row)
+(clockwise from map north = camera yaw 0); the panorama is sampled bilinearly at
+u = (azimuth − left edge) / 360° × repeat (wrapping), v = (top − elevation) / (top − bottom)
+(clamped). The result is blended into the haze colour (colour 255 through light row 0, the colour
+the terrain fades to, §5.3) by smoothstep(0, horizon blend, elevation), so below the horizon it is
+the haze colour. With a sun, a disk of the sidecar's angular radius (anti-aliased over one pixel,
+the sun colour pushed towards white) and a corona `colour × (0.45·e^(−a/2.2r) + 0.10·e^(−a/9r))`
+(a = angle to the sun, r = disk radius) are added.
+
+Sun glare (SUN GLARE display option, on by default; only with a true-colour sky that has a sun and
+`glare` > 0): when the sun lies in front of the camera, its screen position is projected and an edge
+fade computed, 1 up to 75 % of the way from the centre to the screen edge, 0 at 120 %. After the 3D
+view is drawn, a 1 × 1 pass reads the depth buffer (sample 0 when multisampled) at the points of an
+8 × 8 grid inside a disc of 1.6 × the sun's pixel radius (at least 3 pixels) around the sun,
+clamped to the screen; the share of points still at the clear depth (only sky there) is the sun's
+visibility. The composite then adds, on the 3D view below the HUD, `glare × visibility × fade ×`
+(a bloom and warm veil in the sun colour falling off with the distance to the sun, five soft ghost
+discs of different tints and sizes at 0.45, 0.8, 1.3, 1.7 and 2.15 of the way from the sun through
+the screen centre, and a faint ring). The glare changes no game state.
+
 ## 7. Things on a cell
 
 For each visited cell, its thing list is walked; a thing flagged "hidden" (an invisible craft, the
@@ -621,6 +645,8 @@ function); the reference recreation exposes it as a port feature:
   order rules for sprites and shadows).
 - The cracked-glass statics are drawn whenever the HUD is shown (no view-slot gate).
 - Tab shows a port-only top-down debug map.
+- Port addition: an optional true-colour sky with a sun and sun glare (§6.1), drawn instead of the
+  palette sky when the track has `DATA/SKY0-N.PNG`; tracks without one are drawn as before.
 
 ## Known gaps
 

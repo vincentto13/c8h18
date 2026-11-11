@@ -109,6 +109,8 @@ impl Race {
         gfx.set_colour_table(&table.data);
         gfx.set_terrain_textures(&textures);
         gfx.set_sky(&sky);
+        // port addition: a true-colour sky replaces the palette sky when the package has one
+        gfx.set_true_sky(crate::data::truesky::load(t - 1).as_ref());
         gfx.set_palette(&ctx.assets.palette.vga);
         let mut w = World::new(lvl, ctx.assets.rings.clone());
         w.demo = setup.demo;
