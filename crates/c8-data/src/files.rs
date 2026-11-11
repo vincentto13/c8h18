@@ -28,7 +28,8 @@ pub fn resolve(rel: &str) -> Option<PathBuf> {
     over.and_then(|o| resolve_in(o, rel)).or_else(|| resolve_in(data_dir(), rel))
 }
 
-fn resolve_in(root: PathBuf, rel: &str) -> Option<PathBuf> {
+/// Resolve `rel` case-insensitively under `root` only (no override folder).
+pub fn resolve_in(root: PathBuf, rel: &str) -> Option<PathBuf> {
     let mut cur = root;
     for part in rel.split('/') {
         let direct = cur.join(part);

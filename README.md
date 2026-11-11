@@ -38,9 +38,9 @@ Options:
 | Option | Effect |
 |---|---|
 | `-s`, `/s`, `--silent` | no sound or music |
-| `--no-intro` | skip the intro movie |
+| `--no-intro` | skip the intro movie (also skipped, silently, when `DATA/INTRO.DAT` is missing) |
 | `--speed N` | game speed in percent of the original 20 ticks/s (default 90; e.g. 100 = original, 80 = slower) |
-| `<path>` or `GAME_DATA=<path>` | data directory (DATA/, MAPS/, OBJECTS/, SOUND/) |
+| `<path>`, `--data <path>` or `GAME_DATA=<path>` | data directory (DATA/, MAPS/, OBJECTS/, SOUND/) |
 | `--race N` / `--demo N` | debug: go straight to a race / demo race on track N |
 | `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
@@ -48,6 +48,38 @@ Options:
 | `--lang <code>` | use this language (`en`, `de`, `fr`, `es`, `it`, `pl`) instead of the saved one, without saving it |
 
 Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
+
+### Partial data sets
+
+The game also runs from a data folder that holds only some of the original files, e.g. one made of
+our own assets only (port addition, spec 02 §17):
+
+- **Intro.** Without `DATA/INTRO.DAT` the intro is skipped as with `--no-intro`; a truncated file
+  plays the frames it has, one with a bad header is skipped.
+- **Models.** A missing or unreadable model in `OBJECTS/DATA` is drawn as nothing.
+- **Tracks.** Only the tracks whose files are all found (in the `--override` folder or the data
+  folder) are offered: the track carousel shows just those, a championship is raced over those in
+  track order (one track is a championship of one race), and demo races use them. With all six
+  present nothing changes. Track N (1..6) needs:
+
+  | File | What |
+  |---|---|
+  | `MAPS/LEVEL0-N.DAT` | the level |
+  | `DATA/TEXTU0-(N-1).DAT` | terrain textures |
+  | `DATA/SKY0-(N-1).DAT` | sky |
+  | `DATA/TABLE0-(N-1).DAT` | colour (light) table |
+
+  Optional: `OBJECTS/DATA/TRACK0-(N-1).DAT` (its carousel model; nothing is drawn without it) and its
+  minimap pictures in the shared `DATA/TRACK0-1.DAT/.TAB` (entries 1–2, 3–5, 6, 7–8, 9–10, 11 for
+  tracks 1..6; nothing is drawn for missing entries). Track names, lap counts and the music tune
+  are still built in by track number. `DATA/TABLE0-0.DAT` is needed in any case (the menus use it),
+  but alone it does not make track 1 available. The game logs which tracks it found (`RUST_LOG=info`).
+
+  The other start-up files are always needed: `DATA/PALET0-0.DAT`, the fonts `HFONT0-0`, `MFONT0-0`,
+  `OLFNT0-1`, `OSFNT0-1`, `PFONT0-1` (`.DAT` + `.TAB`), the sprite sheets `PANEL0-1`, `LOGO0-1`,
+  `TRACK0-1` (`.DAT` + `.TAB`), `OSCR0-1.DAT`, `ONET0-1.DAT`, `TITLE.DAT`, `PUZZLE.DAT`, `TMAPS.DAT/.TAB`,
+  `SRCH0-0.DAT`, `TABLE0-0.DAT`, `OBJECTS/DATA/TEX0-0.DAT/.TAB` and `lang/*.txt`. Sound files
+  (`SOUND/SOUND.DAT`, `MUSIC.DAT`, `SAMPLE.OPL`) are optional: without them it is silent.
 
 ## Display options
 

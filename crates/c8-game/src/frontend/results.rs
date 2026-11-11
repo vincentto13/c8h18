@@ -65,7 +65,13 @@ pub struct Outcome {
 }
 
 /// Process a finished (non-demo) race.
-pub fn after_race(mut res: RaceResult, cfg: &mut Config) -> Outcome {
+pub fn after_race(res: RaceResult, cfg: &mut Config) -> Outcome {
+    after_race_in(res, cfg, crate::tracks::available())
+}
+
+/// `after_race` with the available tracks given: a championship runs over those, in track order
+/// (port addition; with all six this is the original progression).
+fn after_race_in(mut res: RaceResult, cfg: &mut Config, avail: &[usize]) -> Outcome {
     let champ = res.championship;
     let mut screens = Vec::new();
     let rn = cfg.race_number() as usize;
@@ -120,16 +126,16 @@ pub fn after_race(mut res: RaceResult, cfg: &mut Config) -> Outcome {
     }
     let mut champ_on = champ;
     if champ && res.classified {
-        if rn < 5 {
+        if let Some(next) = crate::tracks::next_in(avail, rn) {
             if champ_place(cfg) <= 3 {
-                cfg.set_race_number(rn as u16 + 1);
+                cfg.set_race_number(next as u16);
             } else {
                 for (i, p) in res.players.iter().enumerate().take(8) {
                     cfg.set_champ_points(i, cfg.champ_points(i).saturating_sub(p.points as i16));
                 }
             }
         } else {
-            cfg.set_race_number(0);
+            cfg.set_race_number(crate::tracks::first_in(avail).unwrap_or(0) as u16);
             champ_on = false;
             enter_hiscores(cfg);
         }
@@ -240,4 +246,73 @@ pub fn hiscore_markup(cfg: &Config, a: &Assets) -> Vec<u8> {
         m.c('J', 0).c('X', 608 - w - text_w(a, 3, &t)).txt(&t);
     }
     m.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::race::types::PlayerResult;
+
+    /// A classified championship race on the config's current track, finished in slot order
+    /// (the human wins) or with the human last.
+    fn race(cfg: &Config, human_wins: bool) -> RaceResult {
+        let rn = cfg.race_number() as usize;
+        let players = (0..8)
+            .map(|k| PlayerResult {
+                name: format!("P{k}"),
+                team: k as u8,
+                craft: (k % 6) as u8,
+                human: k == 0,
+                finish_place: if human_wins { k as u8 + 1 } else { [8, 1, 2, 3, 4, 5, 6, 7][k] },
+                finish_time: 9000,
+                best_lap: 700,
+                laps: DEFAULT_LAPS[rn] as u32,
+                kills: 0,
+                deaths: 0,
+                hit_accuracy: 0,
+                assessment: 0,
+                points: 0,
+            })
+            .collect();
+        RaceResult { demo: false, championship: true, track: rn + 1, quit_game: false, classified: true, players }
+    }
+
+    /// Race a whole championship (human always wins) from the first track; the tracks raced.
+    fn run(avail: &[usize]) -> Vec<usize> {
+        let mut cfg = Config::fresh();
+        cfg.set_race_number(crate::tracks::first_in(avail).unwrap() as u16);
+        let mut raced = Vec::new();
+        loop {
+            raced.push(cfg.race_number() as usize);
+            let out = after_race_in(race(&cfg, true), &mut cfg, avail);
+            if !out.champ {
+                break;
+            }
+            assert!(raced.len() < 10);
+        }
+        assert_eq!(cfg.race_number() as usize, crate::tracks::first_in(avail).unwrap(), "back at the first track");
+        raced
+    }
+
+    #[test]
+    fn championship_over_the_available_tracks() {
+        assert_eq!(run(&[0, 1, 2, 3, 4, 5]), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(run(&[0]), vec![0]);
+        assert_eq!(run(&[1]), vec![1]);
+        assert_eq!(run(&[0, 2, 5]), vec![0, 2, 5]);
+    }
+
+    #[test]
+    fn losing_retakes_the_same_track() {
+        let avail = [0, 3];
+        let mut cfg = Config::fresh();
+        cfg.set_race_number(0);
+        let out = after_race_in(race(&cfg, false), &mut cfg, &avail);
+        assert!(out.champ);
+        assert_eq!(cfg.race_number(), 0);
+        assert_eq!(cfg.champ_points(0), 0, "points taken back");
+        let out = after_race_in(race(&cfg, true), &mut cfg, &avail);
+        assert!(out.champ);
+        assert_eq!(cfg.race_number(), 3);
+    }
 }

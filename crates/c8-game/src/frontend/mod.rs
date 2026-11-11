@@ -15,6 +15,7 @@ use crate::gfx::canvas::{Blit, Canvas};
 use crate::gfx::Scene;
 use crate::input::{KeyCode, KeyPress};
 use crate::race::types::{PlayerSetup, RaceResult, RaceSetup, AI_NAMES};
+use crate::tracks;
 use carousel::{Carousel, Kind};
 use markup::{sfx, st, Mk, Typer, S_CHANGE, S_PRINTTYP, S_SELECT};
 use menu::{ActId, MenuEv, MenuId, MenuState};
@@ -185,7 +186,7 @@ impl FrontEnd {
         self.menu = MenuState::new(MenuId::Main);
         if self.champ {
             self.menu.stack.push((MenuId::Race, 0));
-            let c = if ctx.cfg.race_number() != 0 { 0 } else { 1 };
+            let c = if ctx.cfg.race_number() as usize != tracks::first() { 0 } else { 1 };
             self.menu.stack.push((MenuId::Champ, c));
         }
     }
@@ -196,14 +197,22 @@ impl FrontEnd {
         self.typer2.reset();
     }
 
+    /// Track selection: the ring of the available tracks (single race) or the current race's
+    /// track (championship). Stays in the menu if no track is available (port addition).
     fn start_track(&mut self, ctx: &Ctx) {
-        let rn = ctx.cfg.race_number() as usize;
-        self.carousel = Some(Carousel::new(if self.champ { Kind::ChampTrack(rn) } else { Kind::Tracks }, rn));
+        let avail = tracks::available();
+        if avail.is_empty() {
+            return;
+        }
+        let rn = tracks::snap(ctx.cfg.race_number() as usize);
+        let kind = if self.champ { Kind::ChampTrack(rn) } else { Kind::Tracks };
+        let items = if self.champ { vec![rn] } else { avail.to_vec() };
+        self.carousel = Some(Carousel::new(kind, items, rn));
         self.st = St::Track;
     }
 
     fn start_craft(&mut self, ctx: &Ctx) {
-        self.carousel = Some(Carousel::new(Kind::Crafts, ctx.cfg.craft() as usize));
+        self.carousel = Some(Carousel::new(Kind::Crafts, (0..6).collect(), ctx.cfg.craft() as usize));
         self.tbox.reanimate();
         self.st = St::Craft;
     }
@@ -218,12 +227,13 @@ impl FrontEnd {
     /// RaceSetup for a race (spec 02 §10) or a demo race (§8).
     fn race_setup(&self, ctx: &Ctx, demo: bool) -> RaceSetup {
         let cfg = &*ctx.cfg;
-        let rn = cfg.race_number() as usize;
+        let rn = tracks::snap(cfg.race_number() as usize);
         let track = rn + 1;
         let champ = self.champ && !demo;
         let laps = if champ || demo { DEFAULT_LAPS[rn] as u32 } else { cfg.track_laps(rn) as u32 };
         let d = cfg.difficulty();
-        let diff = if champ { d.min(rn as u8) } else { d };
+        // the championship's k-th race (k = race number with all six tracks) is played at min(k, d)
+        let diff = if champ { d.min(tracks::ordinal_in(tracks::available(), rn) as u8) } else { d };
         let (team, craft) = (cfg.team() as usize, cfg.craft() as usize);
         let mut players = Vec::new();
         if !demo {
@@ -283,6 +293,11 @@ impl FrontEnd {
             return FeOut::Quit;
         }
         self.blink = self.blink.wrapping_add(1);
+        // port addition: the race number always names an available track (a no-op with all six)
+        let rn = ctx.cfg.race_number() as usize;
+        if tracks::snap(rn) != rn {
+            ctx.cfg.set_race_number(tracks::snap(rn) as u16);
+        }
         let target = match self.st {
             St::Lang | St::Name | St::Menu | St::LoadList | St::SaveList => BOX_MENU,
             St::Track | St::Craft => BOX_CAROUSEL,
@@ -296,8 +311,8 @@ impl FrontEnd {
         if let Some(c) = &mut self.carousel {
             if c.frame() {
                 match c.kind {
-                    Kind::Tracks => ctx.cfg.set_race_number(c.sel as u16),
-                    Kind::Crafts => ctx.cfg.set_craft(c.sel as u8),
+                    Kind::Tracks => ctx.cfg.set_race_number(c.item() as u16),
+                    Kind::Crafts => ctx.cfg.set_craft(c.item() as u8),
                     _ => {}
                 }
             }
@@ -361,12 +376,12 @@ impl FrontEnd {
                 let champ = self.champ;
                 let c = self.carousel.as_mut().unwrap();
                 match k.code {
-                    KeyCode::ArrowLeft | KeyCode::ArrowRight if !champ && !c.turning() => {
+                    KeyCode::ArrowLeft | KeyCode::ArrowRight if !champ && !c.turning() && c.can_turn() => {
                         c.start_turn(k.code == KeyCode::ArrowRight);
                         sfx(ctx.audio, S_CHANGE);
                     }
                     KeyCode::ArrowUp | KeyCode::ArrowDown if !champ && !c.turning() => {
-                        let t = c.sel;
+                        let t = c.item();
                         let l = ctx.cfg.track_laps(t) as i32;
                         let n = if k.code == KeyCode::ArrowUp { if l >= 50 { 1 } else { l + 1 } } else if l <= 1 { 50 } else { l - 1 };
                         ctx.cfg.set_track_laps(t, n as u8);
@@ -379,7 +394,7 @@ impl FrontEnd {
                     }
                     _ if is_enter(&k) && !c.turning() => {
                         sfx(ctx.audio, S_SELECT);
-                        if champ && ctx.cfg.race_number() != 0 {
+                        if champ && ctx.cfg.race_number() as usize != tracks::first() {
                             return FeOut::Race(self.race_setup(ctx, false));
                         }
                         self.start_craft(ctx);
@@ -454,7 +469,7 @@ impl FrontEnd {
                 self.idle = 0;
                 let demo = !ATTRACT_DEMO.load(Ordering::Relaxed);
                 ATTRACT_DEMO.store(demo, Ordering::Relaxed);
-                if demo {
+                if demo && !tracks::available().is_empty() {
                     return FeOut::Race(self.race_setup(ctx, true));
                 }
                 self.st = St::Hiscores;
@@ -472,7 +487,7 @@ impl FrontEnd {
                 }
                 ActId::Continue => self.start_track(ctx),
                 ActId::New => {
-                    ctx.cfg.set_race_number(0);
+                    ctx.cfg.set_race_number(tracks::first() as u16);
                     for k in 0..8 {
                         ctx.cfg.set_champ_points(k, 0);
                     }
@@ -600,7 +615,7 @@ impl FrontEnd {
                 let c = self.carousel.as_ref().unwrap();
                 let t = match c.kind {
                     Kind::ChampTrack(t) => t,
-                    _ => c.sel,
+                    _ => c.item(),
                 };
                 const TRACKS: [&str; 6] = [
                     "1. AMAZON DELTA TURNPIKE",

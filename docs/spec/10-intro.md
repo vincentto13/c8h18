@@ -125,3 +125,6 @@ intro's music does not continue into the game; the title and the front end are s
 - In 640×480 the 320×200 movie is pixel-doubled into the middle 640×400 rows (the original always plays at 320×200).
 - The script's sound operations are performed by the port's own mixer and the emulated OPL3 (FM variant of TINTRO2).
 - After the intro the port shows the title splash for 3 s or until a key.
+- The movie is optional: without `DATA/INTRO.DAT`, or with one whose header or first frame is unusable, the intro is
+  skipped silently as with `--no-intro` (sound bank 1 and tune 4 are then never loaded). A truncated file plays the
+  frames it has and ends after the last complete one.

@@ -142,7 +142,7 @@ pub fn items(menu: MenuId, ctx: &Ctx, waiting_bind: Option<Action>) -> Vec<Item>
             item(st(l, 51), Act::Back),
         ],
         MenuId::Champ => vec![
-            Item { hidden: cfg.race_number() == 0, ..item(st(l, 147), Act::Action(ActId::Continue)) },
+            Item { hidden: cfg.race_number() as usize == crate::tracks::first(), ..item(st(l, 147), Act::Action(ActId::Continue)) },
             item(st(l, 186), Act::Action(ActId::New)),
             item(st(l, 187), Act::Action(ActId::Load)),
             item(st(l, 188), Act::Action(ActId::Save)),
@@ -479,7 +479,7 @@ impl MenuState {
                         (MenuEv::Changed, true)
                     }
                     Act::OpenChamp => {
-                        let c = if ctx.cfg.race_number() != 0 { 0 } else { 1 };
+                        let c = if ctx.cfg.race_number() as usize != crate::tracks::first() { 0 } else { 1 };
                         self.stack.push((MenuId::Champ, c));
                         (MenuEv::ChampOpened, true)
                     }

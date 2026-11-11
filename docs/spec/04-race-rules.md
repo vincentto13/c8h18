@@ -534,6 +534,8 @@ b = (b + q) >> 1`. The cracks are drawn only while the player's view-slot word i
 - The port raises only the banner messages listed with a "when" above, in call order rather than in
   the original's request-table order, and does not raise FINAL LAP or WRONG WAY.
 - The demo race uses the championship lap counts.
+- With only some tracks present, a championship runs over the available tracks and the computer players' level
+  in it is min(k, d) for its k-th race (chapter 02 §17).
 
 ## Known gaps
 

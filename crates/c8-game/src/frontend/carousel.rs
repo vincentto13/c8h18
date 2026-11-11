@@ -14,7 +14,11 @@ pub enum Kind {
 
 pub struct Carousel {
     pub kind: Kind,
+    /// position in `items` of the item in front
     pub sel: usize,
+    /// the items on the ring: track numbers (0-based; only the available tracks, port addition)
+    /// or craft types 0..5
+    pub items: Vec<usize>,
     /// turn counter: 24..1 positive = Left, negative = Right, 0 = idle
     pub turn: i32,
     pub spins: [i32; 6],
@@ -27,14 +31,30 @@ fn rad(a: i32) -> f32 {
 }
 
 impl Carousel {
-    pub fn new(kind: Kind, sel: usize) -> Carousel {
+    /// `items`: what the ring holds (at most 6; must not be empty); `sel`: the item in front, the
+    /// first one if it is not on the ring.
+    pub fn new(kind: Kind, items: Vec<usize>, sel: usize) -> Carousel {
+        debug_assert!(!items.is_empty() && items.len() <= 6);
         let mut spins = [0; 6];
         if kind == Kind::Crafts {
             for (j, s) in spins.iter_mut().enumerate() {
                 *s = (j as i32 + 1) * 341;
             }
         }
-        Carousel { kind, sel, turn: 0, spins }
+        let sel = items.iter().position(|&i| i == sel).unwrap_or(0);
+        Carousel { kind, sel, items, turn: 0, spins }
+    }
+    /// The item in front (track or craft number).
+    pub fn item(&self) -> usize {
+        self.items.get(self.sel).copied().unwrap_or(0)
+    }
+    /// Whether Left / Right can turn the ring (more than one item).
+    pub fn can_turn(&self) -> bool {
+        self.items.len() > 1
+    }
+    /// Angle between neighbouring items (341 for the full ring of six).
+    fn step(&self) -> i32 {
+        2048 / self.items.len().max(1) as i32
     }
     pub fn turning(&self) -> bool {
         self.turn != 0
@@ -45,9 +65,10 @@ impl Carousel {
     }
     /// One frame; returns true when a turn ended and the selection changed.
     pub fn frame(&mut self) -> bool {
+        let items = &self.items;
         for (j, s) in self.spins.iter_mut().enumerate() {
             *s -= match self.kind {
-                Kind::Tracks => 16 + j as i32,
+                Kind::Tracks => 16 + items.get(j).copied().unwrap_or(j) as i32,
                 Kind::Crafts => 16,
                 Kind::ChampTrack(_) => 8,
             };
@@ -57,7 +78,8 @@ impl Carousel {
             let right = self.turn < 0;
             self.turn -= self.turn.signum();
             if self.turn == 0 {
-                self.sel = if right { (self.sel + 1) % 6 } else { (self.sel + 5) % 6 };
+                let n = self.items.len().max(1);
+                self.sel = if right { (self.sel + 1) % n } else { (self.sel + n - 1) % n };
                 return true;
             }
         }
@@ -67,7 +89,7 @@ impl Carousel {
         if self.turn == 0 {
             0
         } else {
-            let o = 341 * (25 - self.turn.abs()) / 24;
+            let o = self.step() * (25 - self.turn.abs()) / 24;
             if self.turn < 0 { -o } else { o }
         }
     }
@@ -106,10 +128,11 @@ impl Carousel {
             _ => {
                 let zbase = if self.kind == Kind::Tracks { 5995.0 } else { 6995.0 };
                 let off = self.offset();
-                for i in 0..6 {
-                    let a = (i as i32 - self.sel as i32) * 341 + off;
+                let step = self.step();
+                for (i, &item) in self.items.iter().enumerate().take(6) {
+                    let a = (i as i32 - self.sel as i32) * step + off;
                     let (s, c) = rad(a).sin_cos();
-                    let model = if self.kind == Kind::Tracks { MODEL_TRACK0 + i } else { craft_model(i, team as usize) };
+                    let model = if self.kind == Kind::Tracks { MODEL_TRACK0 + item } else { craft_model(item, team as usize) };
                     place(model, s * 1856.0, 350.0 - c * 716.0, zbase - c * 3336.0, self.spins[i]);
                 }
             }

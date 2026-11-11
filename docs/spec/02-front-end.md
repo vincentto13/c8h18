@@ -612,6 +612,22 @@ All from SOUND.DAT bank 0, played at the effects volume, centred:
 - DETAIL OPTIONS is never hidden (the port has no low-memory mode); NETWORK OPTIONS is always hidden (no network).
 - Choosing a SCREEN RESOLUTION item closes that submenu.
 - Track records of 0 count as "no record" (the port's fresh config starts the records at 0, see chapter 01).
+- Port addition, partial track sets: a track is **available** when its level `MAPS/LEVEL0-t.DAT` and its
+  `DATA/TEXTU0-(t-1).DAT`, `DATA/SKY0-(t-1).DAT` and `DATA/TABLE0-(t-1).DAT` are all found (override folder first,
+  then the data folder). Its preview model (model 50 + t − 1) and its minimap pictures are optional (missing models are
+  drawn as nothing). With all six tracks available everything below is the original behaviour. Otherwise:
+  - The race number stays a track number (0..5) but always names an available track: any other value (fresh config,
+    loaded slot, config from a full set) is replaced by the next available track after it, or else the first one.
+  - Single race: the carousel holds only the available tracks, spaced 2048 / n apart (341 for six); with one track
+    Left and Right do nothing. Up / Down still change that track's laps.
+  - Championship: the races are the available tracks in track order. "Race number 0" in this chapter reads as "the
+    first available track": NEW sets it, CONTINUE is hidden while it is set, craft selection happens on that race
+    only, and the championship menu's cursor rule uses it. Progression (§12) goes to the next available track
+    instead of race number + 1; after the last available track the championship ends (race number = the first
+    available track). The computer players' championship level is min(k, d) for the k-th race (k = 0 for the first),
+    which is the race number with all six tracks. A single available track makes a championship of one race.
+  - Demo race: on the race number's track, hence always an available one. With no track available at all, RACE →
+    track selection does nothing and the idle timeout shows only the high-score table.
 - Port addition: OPTIONS → CONTROLS (after DIFFICULTY LEVEL, before MAIN MENU): items ACCELERATE, BRAKE, LEFT, RIGHT,
   MINIGUN, MISSILE, BOOSTER, each shown as `"<ACTION>: <keys>"`, a submenu PAUSE AND ZOOM (PAUSE, ZOOM IN, ZOOM OUT and
   a back item reading CONTROLS), RESET TO DEFAULTS and MAIN OPTIONS. Enter on a binding shows `"<ACTION>: PRESS A

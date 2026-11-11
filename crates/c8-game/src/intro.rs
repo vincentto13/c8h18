@@ -351,12 +351,13 @@ pub struct Intro {
 }
 
 impl Intro {
-    /// Load DATA/INTRO.DAT. Err if the file is missing/corrupt (the game then skips the intro).
+    /// Load DATA/INTRO.DAT. Err if the file is missing or has no usable header or frame (the game
+    /// then skips the intro). A truncated file plays the frames it has and ends there.
     pub fn new() -> Result<Intro, String> {
         let data = crate::data::files::read_raw("data/intro.dat")?;
         let flc = Flc::new(data)?;
         if flc.chunks() < FRAMES.min(flc.frame_count) {
-            return Err("INTRO.DAT: truncated".into());
+            log::warn!("INTRO.DAT: truncated ({} of {} frames)", flc.chunks(), FRAMES.min(flc.frame_count));
         }
         Ok(Intro {
             pixels: vec![0; WIDTH * HEIGHT],
@@ -466,5 +467,59 @@ impl Intro {
     pub fn finish(&mut self, audio: &mut Audio) {
         audio.stop_all();
         audio.stop_music();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn movie() -> Option<Vec<u8>> {
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources/DATA/INTRO.DAT")).ok()
+    }
+
+    /// Decode every frame chunk; must not panic whatever the bytes are.
+    fn play_all(data: Vec<u8>) {
+        if let Ok(flc) = Flc::new(data) {
+            let mut px = vec![0u8; WIDTH * HEIGHT];
+            let mut pal = [[0u8; 3]; 256];
+            for n in 0..flc.chunks() + 1 {
+                flc.decode(n, &mut px, &mut pal);
+            }
+        }
+    }
+
+    #[test]
+    fn bad_headers_are_errors() {
+        assert!(Flc::new(Vec::new()).is_err());
+        assert!(Flc::new(vec![0; 11]).is_err());
+        assert!(Flc::new(vec![0xff; 4096]).is_err());
+    }
+
+    #[test]
+    fn truncated_and_corrupt_movies_do_not_panic() {
+        let Some(d) = movie() else { return };
+        // truncations: the header and frames that are complete still decode
+        for cut in [12, 100, 129, 1000, d.len() / 7, d.len() / 2, d.len() - 1] {
+            play_all(d[..cut.min(d.len())].to_vec());
+        }
+        let half = Flc::new(d[..d.len() / 2].to_vec()).unwrap();
+        assert!(half.chunks() > 0 && half.chunks() < FRAMES);
+        // corruption: overwrite bytes in the first frames (pseudo-random, repeatable)
+        let mut seed = 0x1234_5678u32;
+        let mut rnd = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        for _ in 0..8 {
+            let mut c = d[..d.len().min(200_000)].to_vec();
+            for _ in 0..400 {
+                let i = 12 + rnd() as usize % (c.len() - 12);
+                c[i] = rnd() as u8;
+            }
+            play_all(c);
+        }
     }
 }

@@ -9,6 +9,7 @@ mod intro;
 mod pad;
 mod video;
 mod race;
+mod tracks;
 
 use assets::Assets;
 use audio::Audio;
@@ -361,6 +362,7 @@ impl ApplicationHandler for App {
         gfx.set_model_atlas(&assets.atlas.pix, assets.atlas.h);
         gfx.set_tmaps(&assets.tmaps);
         let cfg = Config::load();
+        log::info!("tracks available: {:?}", tracks::available().iter().map(|t| t + 1).collect::<Vec<_>>());
         let mut audio = Audio::new(self.opts.sound);
         audio.set_stereo(cfg.stereo());
         audio.set_effects_volume(cfg.effects_volume());
@@ -375,9 +377,14 @@ impl ApplicationHandler for App {
             audio.load_bank(0);
             Mode::Loading(debug_setup(t, demo, &cfg), 0)
         } else if self.opts.intro {
+            // the movie is optional: without (or with an unreadable) INTRO.DAT go on as with --no-intro
             match intro::Intro::new() {
                 Ok(i) => Mode::Intro(i),
-                Err(_) => { audio.load_bank(0); Mode::Title(0.0) }
+                Err(e) => {
+                    log::info!("intro skipped: {e}");
+                    audio.load_bank(0);
+                    Mode::Title(0.0)
+                }
             }
         } else {
             Mode::Title(0.0)
@@ -510,6 +517,11 @@ fn main() {
         } else if l == "--race" || l == "--demo" {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             opts.race = Some((t, l == "--demo"));
+            i += 1;
+        } else if l == "--data" {
+            if let Some(p) = args.get(i + 1) {
+                data::files::set_data_dir(p.into());
+            }
             i += 1;
         } else if !l.starts_with('-') {
             data::files::set_data_dir(a.into());

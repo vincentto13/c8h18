@@ -1,6 +1,6 @@
 //! Assets loaded at start (640x480 sets only; low resolution dropped).
 use crate::data::images::{load_search_rings, ColourTable, Image, Palette, TexAtlas};
-use crate::data::model::{load_all_models, Model};
+use crate::data::model::{model_files, Model};
 use crate::data::sprites::{Font, SpriteSheet};
 use crate::data::tmaps::{load_tmaps, TmapImage};
 use std::rc::Rc;
@@ -45,7 +45,7 @@ impl Assets {
             onet: Image::load_raw("data/onet0-1.dat", 640, 480)?,
             title: Image::load_raw("data/title.dat", 320, 200)?,
             puzzle: Image::load_raw("data/puzzle.dat", 112, 96)?,
-            models: load_all_models()?,
+            models: load_models(),
             atlas: TexAtlas::load()?,
             tmaps: load_tmaps()?,
             rings: load_search_rings()?,
@@ -54,4 +54,23 @@ impl Assets {
             cube,
         })
     }
+}
+
+/// The 62 models in their fixed slots. A missing or unreadable model becomes an empty one (drawn as
+/// nothing), so a data folder may leave out e.g. the preview models of tracks it does not have.
+fn load_models() -> Vec<Model> {
+    model_files()
+        .iter()
+        .map(|n| {
+            let rel = format!("objects/data/{n}.dat");
+            if crate::data::files::resolve(&rel).is_none() {
+                log::info!("model {n} missing: drawn as nothing");
+                return Model::default();
+            }
+            Model::load(&rel).unwrap_or_else(|e| {
+                log::warn!("{e}: drawn as nothing");
+                Model::default()
+            })
+        })
+        .collect()
 }
