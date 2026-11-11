@@ -328,9 +328,10 @@ mod tests {
         assert_eq!(n, 62);
     }
 
-    /// The replacement crafts and atlas in `assets/models` (made by the local modelgen tool): every
-    /// model file there passes `check`, round-trips byte-exact, and keeps its UVs inside its atlas
-    /// entries; the original non-craft models still fit the new atlas's entries too.
+    /// The replacement models and atlas in `assets/models` (made by the local modelgen tool): all 62
+    /// model files are there (crafts, props, recovery truck, track previews), every one passes
+    /// `check`, round-trips byte-exact and keeps its UVs inside its atlas entries. A model missing
+    /// from the folder would fall back to the original, so it must fit the new atlas too.
     #[test]
     fn generated_models_are_valid() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models/OBJECTS/DATA");
@@ -358,7 +359,7 @@ mod tests {
             fits(&m, &name);
             n += 1;
         }
-        assert!(n >= 48, "{n} models");
+        assert_eq!(n, model_files().len(), "models in assets/models");
     }
 
     #[test]

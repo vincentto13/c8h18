@@ -294,6 +294,87 @@ Resources: `docs://format` (units, layers, entity types, what a race needs), `le
 drawn from scratch: every entry keeps the original's width, height and ink box, so text lays out
 exactly as before, but the glyphs are new. Play with them with `c8h18 --override assets/fonts`.
 
+## Models
+
+Model files (`OBJECTS/DATA/*.DAT`; one model per file) open in a 3D view drawn the way the game
+draws them (the game's triangle builder from `c8-render`, palette and atlas through the chosen
+colour table). Drag to orbit, right/middle or Shift drag to pan, wheel or pinch to zoom; toggles
+for faces, wireframe, shading (to read the shape; the game has none) and axes (red right, green
+up, blue forward). Hovering a triangle shows its type, atlas entry or colour, vertices, shade bytes
+and UVs; clicking selects it to change its type, entry/colour and UVs, flip or delete it (undoable).
+The side panel lists vertices, triangles per type, texture entries, colours, bounds, size, flags
+and the format limits.
+
+**Blender**: *Export .glb* writes glTF 2.0 with the texture sheet (TEX0-0 with the palette applied)
+embedded as a PNG and unlit materials named after the triangle type and atlas entry or colour
+(`c8_t5_e12`, `c8_f4_c37`, also in the materials' `extras`). It imports upright and facing
+Blender's front (−Y); 1 m = 256 file units (a car is about 4 m). Import into Blender with the
+default options; edit; assign existing `c8_` materials to new faces and keep their UVs on the
+sheet; export as glTF Binary with *Include → Custom Properties* on. *Import…* reads .glb, .gltf
+(embedded buffers) or .obj back, rounds positions to file units, maps materials and UVs back to
+types and atlas entries (foreign materials: textured → type 5 with the entry found from the UVs,
+others → the nearest palette colour, type 0), and checks the limits (at most 256 vertices, as
+triangles address them with a byte; coordinates within ±128 m; UVs within 255 texels of the
+entry's corner). Unchanged geometry comes back byte-identical (the export carries the original
+file, and the open model is the template); changed geometry keeps the original vertex order,
+triangle order and shade bytes for what is still there. *Export .obj* writes OBJ + MTL + PNG
+with the same conventions. *Test in game* puts the model in a race on track 1 (TRACK0-* in the
+track-selection screen).
+
+Without a window:
+
+```
+c8h18-edit [--data <dir>] [--table 0..5] --export-model OBJECTS/DATA/CAR0-0.DAT car.glb   # or car.obj
+c8h18-edit [--data <dir>] [--like OBJECTS/DATA/CAR0-0.DAT] --import-model car.glb CAR0-0.DAT
+```
+
+`--override <dir>` takes files from `<dir>` (same layout as the data folder) first, like the game's
+option: e.g. `--override assets/models` exports with the new texture atlas and maps imported UVs
+to its entries.
+
+`cargo test -p c8-edit blender -- --ignored` runs every shipped model through Blender (needs
+`blender` on the PATH): glTF (Blender's default import) and OBJ come back byte-identical. With
+"Merge Vertices" on, Blender deletes zero-area triangles and the back of two-sided faces (MARSH0-0,
+SIGN0-0); everything else survives.
+
+### MCP (AI agents)
+
+The editor is also an MCP server, so an agent such as Claude Code can inspect and edit levels:
+- read cells, terrain, textures and light;
+- edit block columns, entities, wall and waypoint chains, and regions;
+- run the checks and the AI test;
+- see the level through top-down and 3D pictures.
+
+Every editing call is one undo step, labelled "MCP: …".
+
+- **Live, in the running editor.** The editor listens on `http://127.0.0.1:47811/mcp` (another
+  free port if that one is taken). It accepts this computer only and needs a bearer token.
+  - Click "MCP" in the status bar for the endpoint, the token, a "Copy Claude Code command" button
+    (`claude mcp add --transport http c8h18-edit <url> --header "Authorization: Bearer <token>"`),
+    a pause switch and the activity log.
+  - The agent works on the open level tabs, and you see its edits as they happen. Cmd+Z undoes them.
+  - The port and token are remembered; "New token" replaces the token.
+- **Headless.** `c8h18-edit mcp --data <game data> [--allow <folder>]... [level]` serves MCP over
+  stdio without a window, e.g.
+  `claude mcp add c8h18-edit -- c8h18-edit mcp --data /path/to/game --allow /path/to/tracks`.
+  - Levels are read from the data folder and the allowed folders, and written only into the
+    allowed folders (default: the current directory).
+  - The game data folder is never written in either mode.
+
+Tools:
+- `editor_status`, `level_open` (an original track as a template, or a file), `level_save`,
+  `level_info`;
+- `cells_read`, `cells_write`, `heights_fill`, `heights_ramp`, `heights_smooth`, `textures_fill`,
+  `light_fill`, `light_bake`, `texture_attr_set`;
+- `columns_list`, `block_define`, `column_define`, `column_place`, `column_clear`;
+- `entities_list`, `entity_add`, `entity_update`, `entity_delete`, `chain_add`;
+- `region_add`, `region_update`, `region_delete`;
+- `validate`, `ai_test`, `render_top`, `render_3d` (PNG images);
+- `history`, `undo`, `redo`.
+
+Resources: `docs://format` (units, layers, entity types, what a race needs), `level://summary`,
+`level://validation`. Prompts: `design-track`, `fix-validation`.
+
 ## Sound effects
 
 `assets/sound/SOUND/SOUND.DAT` holds new sound effects synthesised from scratch: both banks (the 35
