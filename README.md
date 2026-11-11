@@ -20,7 +20,7 @@ A Cargo workspace with three crates:
 | `crates/c8-data` | the data file formats (spec 01), read and write; shared by the game and the editor | |
 | `crates/c8-game` | the game | `c8h18` |
 | `crates/c8-audio` | sound and music banks (read and write), WAV samples, XMIDI tunes and the OPL3 music player, shared by the game and the editor | |
-| `crates/c8-render` | the level mesh (floor quads and block faces) and vertex format, shared by the game's renderer and the editor's 3D preview | |
+| `crates/c8-render` | the level mesh (floor quads and block faces), the model triangles and the vertex format, shared by the game's renderer and the editor's 3D views | |
 | `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
 
 ## Build and run
@@ -205,7 +205,50 @@ writes the active file and every other open file with changes into a temporary o
 starts `c8h18 --override <dir>` (the game next to the editor, or on the PATH): textures and
 skies on their track's race, levels on the race of the track set they are shown with, colour
 tables and race sounds on their track's race, tunes where they play, a language with `--lang`, the
-rest in the menus. Models open read-only. The plan is in `docs/editor-plan.md`.
+rest in the menus. The plan is in `docs/editor-plan.md`.
+
+### Models
+
+Model files (`OBJECTS/DATA/*.DAT`; one model per file) open in a 3D view drawn the way the game
+draws them (the game's triangle builder from `c8-render`, palette and atlas through the chosen
+colour table). Drag to orbit, right/middle or Shift drag to pan, wheel or pinch to zoom; toggles
+for faces, wireframe, shading (to read the shape; the game has none) and axes (red right, green
+up, blue forward). Hovering a triangle shows its type, atlas entry or colour, vertices, shade bytes
+and UVs; clicking selects it to change its type, entry/colour and UVs, flip or delete it (undoable).
+The side panel lists vertices, triangles per type, texture entries, colours, bounds, size, flags
+and the format limits.
+
+**Blender**: *Export .glb* writes glTF 2.0 with the texture sheet (TEX0-0 with the palette applied)
+embedded as a PNG and unlit materials named after the triangle type and atlas entry or colour
+(`c8_t5_e12`, `c8_f4_c37`, also in the materials' `extras`). It imports upright and facing
+Blender's front (−Y); 1 m = 256 file units (a car is about 4 m). Import into Blender with the
+default options; edit; assign existing `c8_` materials to new faces and keep their UVs on the
+sheet; export as glTF Binary with *Include → Custom Properties* on. *Import…* reads .glb, .gltf
+(embedded buffers) or .obj back, rounds positions to file units, maps materials and UVs back to
+types and atlas entries (foreign materials: textured → type 5 with the entry found from the UVs,
+others → the nearest palette colour, type 0), and checks the limits (at most 256 vertices, as
+triangles address them with a byte; coordinates within ±128 m; UVs within 255 texels of the
+entry's corner). Unchanged geometry comes back byte-identical (the export carries the original
+file, and the open model is the template); changed geometry keeps the original vertex order,
+triangle order and shade bytes for what is still there. *Export .obj* writes OBJ + MTL + PNG
+with the same conventions. *Test in game* puts the model in a race on track 1 (TRACK0-* in the
+track-selection screen).
+
+Without a window:
+
+```
+c8h18-edit [--data <dir>] [--table 0..5] --export-model OBJECTS/DATA/CAR0-0.DAT car.glb   # or car.obj
+c8h18-edit [--data <dir>] [--like OBJECTS/DATA/CAR0-0.DAT] --import-model car.glb CAR0-0.DAT
+```
+
+`--override <dir>` takes files from `<dir>` (same layout as the data folder) first, like the game's
+option: e.g. `--override assets/models` exports with the new texture atlas and maps imported UVs
+to its entries.
+
+`cargo test -p c8-edit blender -- --ignored` runs every shipped model through Blender (needs
+`blender` on the PATH): glTF (Blender's default import) and OBJ come back byte-identical. With
+"Merge Vertices" on, Blender deletes zero-area triangles and the back of two-sided faces (MARSH0-0,
+SIGN0-0); everything else survives.
 
 ### MCP (AI agents)
 
@@ -244,6 +287,12 @@ Tools:
 
 Resources: `docs://format` (units, layers, entity types, what a race needs), `level://summary`,
 `level://validation`. Prompts: `design-track`, `fix-validation`.
+
+## Fonts
+
+`assets/fonts/DATA` holds new font sheets (HFONT, MFONT, OLFNT, OSFNT, PFONT at both resolutions)
+drawn from scratch: every entry keeps the original's width, height and ink box, so text lays out
+exactly as before, but the glyphs are new. Play with them with `c8h18 --override assets/fonts`.
 
 ## Debug automation
 

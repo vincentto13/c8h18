@@ -25,7 +25,8 @@ Targets: macOS first, Linux and Windows from the same code.
 - Expose the same operations over MCP, with undo, so an agent's edits are visible and reversible
   in the open editor.
 
-Out of scope for v1: editing models (the meshes) and the front-end carousel model.
+Models: a viewer with per-triangle edits and a Blender round trip (glTF / OBJ export and import);
+modelling itself happens in Blender.
 
 ## 2. Architecture
 
@@ -37,12 +38,13 @@ crates/
   c8-data/                library: the data file formats (spec 01), read AND write;
                            levels first, then textures, fonts, sprites, models...
   c8-audio/               sound/music banks, WAV, XMIDI, OPL3 music player (game + editor)
-  c8-render/              level mesh and vertex format (game + editor 3D preview)
+  c8-render/              level mesh, model triangles, vertex format (game + editor 3D views)
   c8-game/                the game, binary `c8h18`
   c8-edit/                the editor, binary `c8h18-edit`
     src/resources.rs       the data folder as resources grouped by kind
     src/doc/               one Document type per resource kind (level editor, viewer for the
                            kinds without an editor yet), undo/redo history of Commands
+    src/model_io/          model exchange: glTF 2.0 (.glb) and OBJ export/import
     src/app.rs             window: browser, tabs, inspector
   c8-sim/      (later)    track build + flight/AI sim, extracted from the game, for the
                            editor's AI test races and the network server
@@ -190,6 +192,7 @@ Safety:
 | 3b | Other resource editors: colour tables (view, regenerate from palette, haze and textures), language files (key list against English, checks, font preview; game option `--lang`), sound and music banks (play, export, replace samples from WAV and tunes from XMIDI; audio code moved to `c8-audio`); explosion rings (SRCH0-0: paint, regenerate, play the spread) | **done** |
 | 4 | MCP: headless stdio and live HTTP modes, the tool set above, image renders, activity log | **done**: 33 tools, 3 resources, 2 prompts, both modes; live mode with a remembered port and token, pause switch and activity log; tested with scripted clients (stdio and HTTP). A track loop built from scratch by Claude Code has not been tried yet |
 | 5 | 3D preview (shared mesh code in `c8-render`, exact light-table colours, fly camera, entity lines) | **done**; the in-editor AI test moved to phase 3 (via `--sim`). Models and billboards in the preview are still open |
+| 5b | Models: `Model` writer in `c8-data` (byte-exact for all 62 files, extra frames and unknown header bytes kept); viewer (game colours via `c8_render::model::push_model`, moved from the game; orbit camera, wireframe, stats, hover info, per-triangle edits with undo); glTF and OBJ export/import with lossless re-import (original embedded in `extras`, materials named by type and atlas entry/colour), format limits checked; Test in game; CLI `--export-model` / `--import-model` | **done**: all 62 models round-trip byte-exact through .glb and .obj, and through Blender 5.2 (glTF with Blender's default import: byte-exact; OBJ: byte-exact with the open model as template; glTF with "Merge Vertices": same triangles, minus the zero-area and back-to-back faces Blender deletes). Not done: models in the level preview, MCP tools for models, editing the vertex shade bytes |
 | 6 | Custom tracks in the game menus; minimap generation; packaging for macOS/Linux/Windows | an edited track is selectable in the game on all three systems |
 
 Phases 1–4 give a usable editor with MCP. Phase 5 is the most work, because of the sim extraction.

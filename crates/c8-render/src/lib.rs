@@ -1,7 +1,8 @@
-//! Level geometry shared by the game's renderer and the editor's 3D preview: the vertex format
-//! and the level mesh (floor quads and block faces, spec 08 §5.2).
+//! Geometry shared by the game's renderer and the editor's 3D views: the vertex format, the level
+//! mesh (floor quads and block faces, spec 08 §5.2) and the model triangles (spec 08 §8).
 use bytemuck::{Pod, Zeroable};
 
+pub mod model;
 pub mod terrain;
 
 #[repr(C)]

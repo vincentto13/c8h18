@@ -1,6 +1,6 @@
 [package]
 name = "c8-render"
-description = "Level geometry and vertex format shared by the game's renderer and the editor's 3D preview"
+description = "Geometry (vertex format, level mesh, model triangles) shared by the game's renderer and the editor's 3D views"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

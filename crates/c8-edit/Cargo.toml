@@ -24,6 +24,7 @@ rmcp = { version = "3.9.0", features = ["server", "transport-io", "transport-str
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "io-std"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 serde_json = "1"
+gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "extras"] }
 base64 = "0.22"
 pollster = "1.0.1"
 tokio-util = "0.7"

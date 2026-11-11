@@ -1,6 +1,6 @@
 //! wgpu renderer: 3D world pass (terrain, models, billboards, sky) and the indexed 2D canvas composite.
 pub mod canvas;
-pub mod model;
+pub use c8_render::model;
 
 use bytemuck::{Pod, Zeroable};
 use std::sync::Arc;
@@ -50,7 +50,7 @@ struct ScenePipes {
     sprite: wgpu::RenderPipeline,
 }
 
-pub use c8_render::{Vertex, K_ATLAS, K_FLAT, K_SPRITE};
+pub use c8_render::{Vertex, K_SPRITE};
 
 /// Camera: position (x, row, height in cells) and 16-bit angles as f32 raw units (65536 per turn).
 #[derive(Clone, Copy, Debug, Default)]
@@ -67,9 +67,7 @@ pub struct Camera {
     pub fixed_43: bool,
 }
 
-pub fn ang(raw: f32) -> f32 {
-    raw / 65536.0 * std::f32::consts::TAU
-}
+pub use c8_render::model::ang;
 
 impl Camera {
     /// (right, up, forward) in world (x, height, row) coordinates.

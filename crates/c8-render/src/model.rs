@@ -1,7 +1,13 @@
-//! Convert a model into world-space triangles.
-use super::{Vertex, K_ATLAS, K_FLAT};
-use crate::data::images::TexAtlas;
-use crate::data::model::Model;
+//! Convert a model into world-space triangles (spec 08 §8); shared by the game's
+//! renderer and the editor's model viewer.
+use crate::{Vertex, K_ATLAS, K_FLAT};
+use c8_data::images::TexAtlas;
+use c8_data::model::Model;
+
+/// Raw 16-bit angle (65536 per turn) in radians.
+pub fn ang(raw: f32) -> f32 {
+    raw / 65536.0 * std::f32::consts::TAU
+}
 
 /// 3x3 rotation, rows = world axes (x, height, row); applied to model-space (mx, mh, mr).
 pub type Mat3 = [[f32; 3]; 3];
@@ -19,7 +25,7 @@ pub fn mat_mul(a: &Mat3, b: &Mat3) -> Mat3 {
 /// Orientation of a craft with yaw, pitch (positive nose down), roll (positive left side up),
 /// all raw 16-bit units. Model space: x right, h up, r backwards (+row when heading north).
 pub fn orient(yaw: f32, pitch: f32, roll: f32) -> Mat3 {
-    let a = super::ang;
+    let a = ang;
     let (sy, cy) = a(yaw).sin_cos();
     let (sp, cp) = a(pitch).sin_cos();
     let (sr, cr) = a(roll).sin_cos();
