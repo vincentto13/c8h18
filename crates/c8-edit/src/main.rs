@@ -27,6 +27,18 @@ fn main() -> eframe::Result {
         return run_mcp(args.collect());
     }
     let all: Vec<String> = std::env::args().skip(1).collect();
+    if all.iter().any(|a| a == "--midi-to-xmi" || a == "--xmi-to-midi") {
+        match run_midi_cli(&all) {
+            Ok(msg) => {
+                println!("{msg}");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("c8h18-edit: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     if all.iter().any(|a| a == "--export-model" || a == "--import-model") {
         match run_model_cli(all) {
             Ok(msg) => {
@@ -51,6 +63,10 @@ fn main() -> eframe::Result {
                 println!("         export a model for Blender (.obj also writes .mtl and _tex.png next to it)");
                 println!("       c8h18-edit [--data <dir>] [--override <dir>] [--like <original.dat>] --import-model <in.glb|in.obj> <out.dat>");
                 println!("         convert a .glb/.gltf/.obj back to the game's model format");
+                println!("       c8h18-edit --midi-to-xmi <in.mid> <out.xmi> [--no-loop]");
+                println!("         convert a Standard MIDI file to XMIDI (loop from loopStart/loopEnd markers, else the whole piece)");
+                println!("       c8h18-edit --xmi-to-midi <in.xmi> <out.mid>");
+                println!("         convert an XMIDI tune to a Standard MIDI file (loop as loopStart/loopEnd markers)");
                 return Ok(());
             }
             _ => open = Some(PathBuf::from(a)),
@@ -61,6 +77,26 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native("c8h18-edit", options, Box::new(move |cc| Ok(Box::new(app::EditorApp::new(cc, data, open)))))
+}
+
+/// `--midi-to-xmi` / `--xmi-to-midi`: tune conversion without a window. Returns a report.
+fn run_midi_cli(args: &[String]) -> Result<String, String> {
+    let no_loop = args.iter().any(|a| a == "--no-loop");
+    let pos = args.iter().position(|a| a == "--midi-to-xmi" || a == "--xmi-to-midi").unwrap();
+    let (Some(i), Some(o)) = (args.get(pos + 1), args.get(pos + 2)) else {
+        return Err(format!("{} takes <in> <out>", args[pos]));
+    };
+    let d = std::fs::read(i).map_err(|e| format!("{i}: {e}"))?;
+    if args[pos] == "--midi-to-xmi" {
+        let lp = if no_loop { c8_audio::smf::Loop::None } else { c8_audio::smf::Loop::Auto };
+        let (xmi, report) = doc::tunes::midi_to_xmi(&d, lp)?;
+        std::fs::write(o, &xmi).map_err(|e| format!("{o}: {e}"))?;
+        Ok(format!("wrote {o} ({} bytes): {report}", xmi.len()))
+    } else {
+        let mid = doc::tunes::xmi_to_midi(&d)?;
+        std::fs::write(o, &mid).map_err(|e| format!("{o}: {e}"))?;
+        Ok(format!("wrote {o} ({} bytes)", mid.len()))
+    }
 }
 
 /// `--export-model` / `--import-model`: model conversion without a window. Returns a report.

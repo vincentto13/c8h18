@@ -8,6 +8,7 @@ use crate::resources::Kind;
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Vec2};
 use c8_audio::container::{Container, Entry, MUSIC_SLOT, MUSIC_SLOTS, SOUND_SLOT, SOUND_SLOTS, SOUND_SLOT_HQ};
 use c8_audio::{music, wav, xmidi};
+use super::tunes::{self, Tunes};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -106,6 +107,8 @@ pub struct SoundDoc {
     generation: u64,
     message: String,
     test: bool,
+    /// OGG replacements of the tunes (MUSIC.DAT only)
+    tunes: Tunes,
 }
 
 impl SoundDoc {
@@ -117,7 +120,8 @@ impl SoundDoc {
         // open on the slot the game plays: the 16-bit 44 kHz one when present
         let slot = if !music && matches!(c.banks.first().map(|b| &b[SOUND_SLOT_HQ]), Some(Some(_))) { SOUND_SLOT_HQ } else { slot };
         let timbres = if music { c8_data::files::read_raw("sound/sample.opl").ok().and_then(|d| music::TimbreBank::parse(&d).ok()) } else { None };
-        Ok(SoundDoc { path, rel, music, c, history: History::default(), bank: 0, slot, sel: 0, all_slots: true, timbres, wave: None, lengths: None, generation: 0, message: String::new(), test: false })
+        let tunes = if music { Tunes::scan(&path) } else { Tunes::default() };
+        Ok(SoundDoc { path, rel, music, c, history: History::default(), bank: 0, slot, sel: 0, all_slots: true, timbres, wave: None, lengths: None, generation: 0, message: String::new(), test: false, tunes })
     }
 
     fn formats(&self) -> &'static [&'static str] {
@@ -157,7 +161,10 @@ impl SoundDoc {
 
     fn play(&mut self, i: usize) {
         let tag = self.tag(i);
-        let r = if self.music {
+        let r = if self.music && self.bank == 0 && self.tunes.get(i).is_some() {
+            // the OGG replacement, looping like in the game
+            audio::rate().and_then(|rate| audio::play_music(&tag, self.tunes.get_mut(i).unwrap().player(rate)?))
+        } else if self.music {
             audio::rate().and_then(|rate| {
                 let mut p = self.player(i, rate)?;
                 p.looping = false;
@@ -179,7 +186,9 @@ impl SoundDoc {
         if self.lengths.as_ref().is_none_or(|(k, _)| *k != key) {
             let v = (0..self.items().len())
                 .map(|i| {
-                    if self.music {
+                    if let Some(f) = self.tunes.get(i).filter(|_| self.music && self.bank == 0) {
+                        f.seconds()
+                    } else if self.music {
                         self.sequence(i).map(|s| s.length() as f64 / 120.0).unwrap_or(0.0)
                     } else {
                         let it = &self.items()[i];
@@ -240,18 +249,28 @@ impl SoundDoc {
         Ok(format!("replaced {name}"))
     }
 
-    /// Render the selected tune once through (at most 10 minutes) as a 44.1 kHz stereo WAV.
-    fn render_tune(&self, i: usize) -> Result<Vec<u8>, String> {
-        const RATE: u32 = 44100;
-        let mut p = self.player(i, RATE)?;
-        p.looping = false;
-        let mut out = Vec::new();
-        let mut buf = vec![0f32; 4096];
-        while !p.finished() && out.len() < (RATE * 600 * 2) as usize {
-            p.render(&mut buf, 1.0, true);
-            out.extend_from_slice(&buf);
+    /// The selected tune as a WAV with a loop (`smpl` chunk) and a report: its OGG decoded, or
+    /// the XMIDI rendered offline on the OPL3 (up to the loop end of a second pass, so the loop
+    /// is seamless; see `tunes::xmidi_wav`).
+    fn render_tune(&mut self, i: usize) -> Result<(Vec<u8>, String), String> {
+        if let Some(f) = self.tunes.get_mut(i).filter(|_| self.bank == 0) {
+            return tunes::ogg_wav(f);
         }
-        Ok(wav::write_i16(RATE, 2, &out))
+        let bank = self.timbres.clone().ok_or("SOUND/SAMPLE.OPL (the FM timbres) not found")?;
+        Ok(tunes::xmidi_wav(self.sequence(i)?, bank))
+    }
+
+    /// Replace the selected tune with a Standard MIDI file converted to XMIDI.
+    fn import_midi(&mut self, path: &Path) -> Result<String, String> {
+        let d = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let (xmi, report) = tunes::midi_to_xmi(&d, c8_audio::smf::Loop::Auto)?;
+        let old = self.items().get(self.sel).ok_or("no tune selected")?.clone();
+        let mut new = old.clone();
+        new.data = xmi;
+        let name = old.name.clone();
+        self.history.run(Box::new(ItemEdit { label: format!("replace {name} from MIDI"), items: vec![(self.bank, self.slot, self.sel, old, new)] }), &mut self.c);
+        self.generation += 1;
+        Ok(format!("replaced {name}: {report}"))
     }
 
     fn waveform(&mut self, ui: &mut egui::Ui) {
@@ -297,13 +316,17 @@ impl Document for SoundDoc {
         Some(&self.path)
     }
     fn dirty(&self) -> bool {
-        self.history.dirty()
+        self.history.dirty() || self.tunes.dirty
     }
     fn can_save(&self) -> bool {
         true
     }
     fn save_to(&mut self, path: &Path) -> Result<(), String> {
         std::fs::write(path, self.c.encode()).map_err(|e| format!("{}: {e}", path.display()))?;
+        if self.music {
+            // the OGG replacements go to MUSIC/ beside the saved MUSIC.DAT
+            self.tunes.save(path)?;
+        }
         self.path = path.to_path_buf();
         self.history.mark_saved();
         Ok(())
@@ -324,7 +347,11 @@ impl Document for SoundDoc {
     }
     fn game_files(&self) -> Result<Vec<(String, Vec<u8>)>, String> {
         let name = if self.music { "SOUND/MUSIC.DAT" } else { "SOUND/SOUND.DAT" };
-        Ok(vec![(name.into(), self.c.encode())])
+        let mut v = vec![(name.to_string(), self.c.encode())];
+        if self.music {
+            v.extend(self.tunes.game_files()?);
+        }
+        Ok(v)
     }
     fn game_args(&self) -> Vec<String> {
         let race = |t: usize| vec!["--no-intro".to_string(), "--race".into(), t.to_string()];
@@ -408,7 +435,18 @@ impl Document for SoundDoc {
                         (false, 0) => sample_use(i + 1),
                         _ => "intro",
                     };
-                    ui.label(RichText::new(usage).color(Color32::GRAY));
+                    if self.music && self.bank == 0 && i < c8_audio::tune::TUNE_NAMES.len() {
+                        // which kind the game plays for this tune
+                        ui.horizontal(|ui| {
+                            match self.tunes.get(i) {
+                                Some(_) => ui.label(RichText::new("OGG").strong().color(Color32::from_rgb(120, 200, 140))),
+                                None => ui.label(RichText::new("XMIDI").color(Color32::from_rgb(140, 170, 230))),
+                            };
+                            ui.label(RichText::new(usage).color(Color32::GRAY));
+                        });
+                    } else {
+                        ui.label(RichText::new(usage).color(Color32::GRAY));
+                    }
                     ui.end_row();
                 }
             });
@@ -454,9 +492,35 @@ impl Document for SoundDoc {
                     self.message = std::fs::write(&p, &it.data).map(|_| format!("wrote {}", p.display())).unwrap_or_else(|e| e.to_string());
                 }
             }
-            if ui.button("Export as WAV…").on_hover_text("Rendered once through on the emulated OPL3, 44.1 kHz stereo").clicked() {
+            if self.bank == 0 && self.sel < c8_audio::tune::TUNE_NAMES.len() {
+                let tag = self.tag(self.sel);
+                if let Some(m) = self.tunes.ui(ui, self.sel, &tag) {
+                    self.message = m;
+                    self.generation += 1;
+                }
+                let hint = format!("An OGG Vorbis file played instead of this XMIDI tune (SOUND/MUSIC/{}.OGG); loop points from its LOOPSTART / LOOPLENGTH comments", c8_audio::tune::TUNE_NAMES[self.sel]);
+                if ui.button(if self.tunes.get(self.sel).is_some() { "Replace OGG…" } else { "Use OGG…" }).on_hover_text(hint).clicked() {
+                    if let Some(p) = rfd::FileDialog::new().add_filter("OGG Vorbis", &["ogg"]).pick_file() {
+                        audio::stop();
+                        self.message = self.tunes.import(self.sel, &p).unwrap_or_else(|e| e);
+                        self.generation += 1;
+                    }
+                }
+                ui.separator();
+            }
+            if ui.button("Export as WAV…").on_hover_text("The OGG decoded, or the XMIDI rendered on the emulated OPL3 (48 kHz, normalised) up to the loop end of a second pass; the loop is in the WAV's smpl chunk").clicked() {
                 if let Some(p) = rfd::FileDialog::new().add_filter("WAV", &["wav"]).set_file_name(format!("{stem}.wav")).save_file() {
-                    self.message = self.render_tune(self.sel).and_then(|w| std::fs::write(&p, w).map_err(|e| e.to_string())).map(|_| format!("wrote {}", p.display())).unwrap_or_else(|e| e);
+                    self.message = self.render_tune(self.sel).and_then(|(w, m)| std::fs::write(&p, w).map_err(|e| e.to_string()).map(|_| format!("wrote {}: {m}", p.display()))).unwrap_or_else(|e| e);
+                }
+            }
+            if ui.button("Export .mid…").on_hover_text("The XMIDI tune as a Standard MIDI file (loop as loopStart / loopEnd markers)").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("MIDI", &["mid"]).set_file_name(format!("{stem}.mid")).save_file() {
+                    self.message = tunes::xmi_to_midi(&it.data).and_then(|m| std::fs::write(&p, m).map_err(|e| e.to_string())).map(|_| format!("wrote {}", p.display())).unwrap_or_else(|e| e);
+                }
+            }
+            if ui.button("Replace from MIDI…").on_hover_text("A Standard MIDI file (.mid), converted to XMIDI: General MIDI programs, drums on channel 10, loop from loopStart / loopEnd markers (else the whole piece)").clicked() {
+                if let Some(p) = rfd::FileDialog::new().add_filter("MIDI", &["mid", "midi", "rmi"]).pick_file() {
+                    self.message = self.import_midi(&p).unwrap_or_else(|e| e);
                 }
             }
             if ui.button("Replace from XMIDI…").on_hover_text("An .XMI file (Miles extended MIDI), e.g. exported from another tune").clicked() {

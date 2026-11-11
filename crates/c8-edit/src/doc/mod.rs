@@ -10,6 +10,7 @@ pub mod pixels;
 pub mod search;
 pub mod sound;
 pub mod table;
+pub mod tunes;
 pub mod viewer;
 
 use crate::resources::Kind;

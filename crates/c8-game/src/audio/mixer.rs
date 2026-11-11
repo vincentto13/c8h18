@@ -1,5 +1,5 @@
 //! Software sample mixer and the state shared with the audio callback.
-use super::music::MusicPlayer;
+use super::tune::TunePlayer;
 use super::wav::Sample;
 use std::sync::Arc;
 
@@ -44,7 +44,8 @@ pub struct Shared {
     pub effects_volume: i32,
     pub music_volume: i32,
     pub stereo: bool,
-    pub music: Option<MusicPlayer>,
+    /// The playing tune: FM (XMIDI on the OPL3) or an OGG replacement.
+    pub music: Option<TunePlayer>,
     pub music_full: bool,
     pub stamp: u64,
 }

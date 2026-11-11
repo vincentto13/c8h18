@@ -8,3 +8,7 @@ license.workspace = true
 [dependencies]
 c8-data = { path = "../c8-data" }
 oplon = "1.0.0"
+# OGG Vorbis music (port addition): decoding (MIT/Apache-2.0) and page rewriting for loop tags (BSD-3-Clause)
+lewton = "0.10.2"
+ogg = "0.8.0"
+log.workspace = true

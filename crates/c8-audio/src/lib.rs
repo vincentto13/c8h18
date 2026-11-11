@@ -3,6 +3,9 @@
 //! player on an emulated OPL3. Output devices and mixing stay with each program.
 pub mod container;
 pub mod music;
+pub mod ogg;
 pub mod opl3;
+pub mod smf;
+pub mod tune;
 pub mod wav;
 pub mod xmidi;

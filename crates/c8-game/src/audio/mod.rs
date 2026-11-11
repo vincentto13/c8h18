@@ -8,10 +8,13 @@
 //! All state shared with the callback sits behind one `Arc<Mutex<Shared>>`.
 
 pub mod mixer;
-pub use c8_audio::{container, music, wav, xmidi};
+pub use c8_audio::{container, music, ogg, tune, wav, xmidi};
 
 use crate::data::files;
 use mixer::Shared;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Voice choice modes (spec 09 §2).
@@ -26,7 +29,13 @@ pub struct Audio {
     sound_dat: Option<Vec<u8>>,
     timbres: Option<music::TimbreBank>,
     tunes: Option<Vec<container::Item>>,
+    /// Bumped by every play_tune / stop_music, so a late OGG decode does not start a stale tune.
+    music_gen: Arc<AtomicU64>,
+    /// Decoded OGG tunes by path (with the file's length and modification time).
+    oggs: OggCache,
 }
+
+type OggCache = Arc<Mutex<HashMap<PathBuf, (u64, Option<std::time::SystemTime>, Arc<ogg::OggTune>)>>>;
 
 impl Audio {
     /// Create the audio system. `enabled == false` (the -s switch) makes every call a no-op.
@@ -64,7 +73,7 @@ impl Audio {
     }
 
     fn with(enabled: bool, shared: Arc<Mutex<Shared>>, stream: Option<cpal::Stream>) -> Audio {
-        Audio { enabled, shared, _stream: stream, sound_dat: None, timbres: None, tunes: None }
+        Audio { enabled, shared, _stream: stream, sound_dat: None, timbres: None, tunes: None, music_gen: Arc::default(), oggs: OggCache::default() }
     }
 
     fn lock(&self) -> MutexGuard<'_, Shared> {
@@ -210,27 +219,74 @@ impl Audio {
 
     /// Play MUSIC.DAT tune (1-based: 1 TGAME1, 2 TGAME2, 3 TGAME4, 4 TINTRO2, 5 TGAME3), looping.
     /// `full_volume` = ignore the configured music volume (intro).
+    ///
+    /// Port addition: an OGG Vorbis file `SOUND/MUSIC/<tune name>.OGG` replaces the XMIDI tune
+    /// (see `c8_audio::tune`). It is decoded on a helper thread (the first time; decoded tunes
+    /// are kept) and starts as soon as it is ready; if it cannot be decoded the FM tune plays.
     pub fn play_tune(&mut self, tune: usize, full_volume: bool) {
         if !self.enabled {
             return;
         }
         let rate = self.lock().out_rate;
-        match self.make_player(tune, rate) {
+        let generation = self.music_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(path) = tune::find_ogg(tune) {
+            let fallback = self.make_fm_player(tune, rate).ok();
+            let (shared, current, cache) = (self.shared.clone(), self.music_gen.clone(), self.oggs.clone());
+            let spawned = std::thread::Builder::new().name("ogg-decode".into()).spawn(move || {
+                let p: tune::TunePlayer = match load_ogg(&cache, &path) {
+                    Ok(t) => ogg::OggPlayer::new(t, rate).into(),
+                    Err(e) => {
+                        log::warn!("{}: {e}; playing the FM tune", path.display());
+                        match fallback {
+                            Some(f) => f.into(),
+                            None => return,
+                        }
+                    }
+                };
+                let mut sh = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if current.load(Ordering::SeqCst) == generation {
+                    log::info!("tune {tune}: playing {} ({})", path.display(), if p.is_ogg() { "OGG" } else { "FM fallback" });
+                    sh.music = Some(p);
+                    sh.music_full = full_volume;
+                }
+            });
+            if let Err(e) = spawned {
+                log::warn!("tune {tune}: {e}");
+            }
+            return;
+        }
+        match self.make_fm_player(tune, rate) {
             Ok(p) => {
+                log::info!("tune {tune}: playing the FM tune ({})", tune::tune_name(tune).unwrap_or("?"));
                 let mut sh = self.lock();
-                sh.music = Some(p);
+                sh.music = Some(p.into());
                 sh.music_full = full_volume;
             }
             Err(e) => log::warn!("tune {tune}: {e}"),
         }
     }
 
-    /// Build a music player for `tune` at output rate `rate` (also used for offline rendering).
-    pub fn make_player(&mut self, tune: usize, rate: u32) -> Result<music::MusicPlayer, String> {
+    /// Build a player for `tune` at output rate `rate`: its OGG replacement if there is one,
+    /// else the XMIDI tune on the OPL3 (also used for offline rendering).
+    #[allow(dead_code)] // used by examples/audio_test and the tests
+    pub fn make_player(&mut self, tune: usize, rate: u32) -> Result<tune::TunePlayer, String> {
+        if let Some(path) = tune::find_ogg(tune) {
+            match load_ogg(&self.oggs, &path) {
+                Ok(t) => return Ok(ogg::OggPlayer::new(t, rate).into()),
+                Err(e) => log::warn!("{}: {e}; using the FM tune", path.display()),
+            }
+        }
+        self.make_fm_player(tune, rate).map(Into::into)
+    }
+
+    /// The XMIDI tune `tune` of MUSIC.DAT slot 2 on the OPL3.
+    pub fn make_fm_player(&mut self, tune: usize, rate: u32) -> Result<music::MusicPlayer, String> {
         if self.timbres.is_none() {
+            log::debug!("FM timbres from {:?}", files::resolve("sound/sample.opl"));
             self.timbres = Some(music::TimbreBank::parse(&files::read_raw("sound/sample.opl")?)?);
         }
         if self.tunes.is_none() {
+            log::debug!("tunes from {:?}", files::resolve("sound/music.dat"));
             let file = files::read_raw("sound/music.dat")?;
             self.tunes = Some(container::load_bank(&file, container::MUSIC_SLOTS, container::MUSIC_SLOT, 0)?);
         }
@@ -246,8 +302,24 @@ impl Audio {
         if !self.enabled {
             return;
         }
+        self.music_gen.fetch_add(1, Ordering::SeqCst);
         self.lock().music = None;
     }
+}
+
+/// Decode an OGG tune, or take it from the cache when the file is unchanged.
+fn load_ogg(cache: &OggCache, path: &Path) -> Result<Arc<ogg::OggTune>, String> {
+    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+    let stamp = (meta.len(), meta.modified().ok());
+    if let Some((len, time, t)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
+        if (*len, *time) == stamp {
+            return Ok(t.clone());
+        }
+    }
+    let t = Arc::new(ogg::decode(&std::fs::read(path).map_err(|e| e.to_string())?)?);
+    log::info!("{}: OGG tune, {:.1} s at {} Hz, loop {}..{}", path.display(), t.seconds(), t.rate, t.loop_start, t.loop_end);
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), (stamp.0, stamp.1, t.clone()));
+    Ok(t)
 }
 
 fn open_stream() -> Result<(cpal::Stream, Arc<Mutex<Shared>>), String> {
@@ -308,4 +380,41 @@ where
             None,
         )
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod music_tests {
+    use super::*;
+
+    /// An OGG at SOUND/MUSIC/<name>.OGG (any case, override folder) replaces that tune only.
+    #[test]
+    fn ogg_replaces_the_xmidi_tune() {
+        files::set_data_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../resources").into());
+        let over = std::env::temp_dir().join(format!("c8-ogg-tune-{}", std::process::id()));
+        std::fs::create_dir_all(over.join("sound/music")).unwrap();
+        std::fs::write(over.join("sound/music/tgame1.ogg"), include_bytes!("../../../c8-audio/tests/data/loop-test.ogg")).unwrap();
+        files::set_override_dir(Some(over.clone()));
+        let mut a = Audio::new_offline(44100);
+        let p1 = a.make_player(1, 44100);
+        let p2 = a.make_player(2, 44100);
+        // the game's path: decoded on a helper thread, then playing in the mixer
+        a.play_tune(1, false);
+        files::set_override_dir(None);
+        assert!(p1.unwrap().is_ogg(), "tune 1 should be the OGG");
+        if let Ok(p) = p2 {
+            assert!(!p.is_ogg(), "tune 2 has no OGG");
+        }
+        let t0 = std::time::Instant::now();
+        while !a.lock().music.as_ref().is_some_and(|m| m.is_ogg()) {
+            assert!(t0.elapsed().as_secs() < 10, "the OGG tune did not start");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let mut buf = vec![0f32; 4410 * 2];
+        a.render(&mut buf);
+        assert!(buf.iter().any(|x| x.abs() > 0.05), "the OGG tune is silent");
+        // a stop before a late decode wins: nothing starts afterwards
+        a.stop_music();
+        assert!(a.lock().music.is_none());
+        let _ = std::fs::remove_dir_all(over);
+    }
 }

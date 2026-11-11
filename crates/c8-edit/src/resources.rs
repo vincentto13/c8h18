@@ -53,6 +53,10 @@ impl Kind {
         if dir == "objects" {
             return if name.starts_with("tex") { Kind::ModelTextures } else { Kind::Model };
         }
+        // a bank outside the data folder (opened by its file name), e.g. assets/music/SOUND/MUSIC.DAT
+        if r == name && (name == "sound.dat" || name == "music.dat") {
+            return Kind::Sound;
+        }
         if dir == "sound" {
             // the containers; the rest are the original's sound drivers and timbre banks
             return if name == "sound.dat" || name == "music.dat" { Kind::Sound } else { Kind::Other };
@@ -130,6 +134,7 @@ mod tests {
         assert_eq!(Kind::of("lang/pl.txt"), Kind::Strings);
         assert_eq!(Kind::of("SOUND/SOUND.DAT"), Kind::Sound);
         assert_eq!(Kind::of("SOUND/MUSIC.DAT"), Kind::Sound);
+        assert_eq!(Kind::of("MUSIC.DAT"), Kind::Sound);
         assert_eq!(Kind::of("SOUND/SB16.DIG"), Kind::Other);
         assert_eq!(Kind::of("DATA/TMAPS.DAT"), Kind::Billboards);
         assert_eq!(Kind::of("DATA/SRCH0-0.DAT"), Kind::SearchRings);

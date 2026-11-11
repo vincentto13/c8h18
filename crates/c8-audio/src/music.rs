@@ -58,6 +58,40 @@ impl TimbreBank {
         }
         Ok(TimbreBank { map })
     }
+
+    /// Write a Global Timbre Library: the header `{patch, bank, offset}` sorted by bank and
+    /// patch, terminated by 0xFF 0xFF, then the 14-byte two-operator timbres. Identical timbres
+    /// are stored once and shared by their header entries.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut keys: Vec<(u8, u8)> = self.map.keys().copied().collect();
+        keys.sort();
+        let header_len = keys.len() * 6 + 2;
+        let mut body: Vec<u8> = Vec::new();
+        let mut stored: HashMap<[u8; 14], usize> = HashMap::new();
+        let mut out = Vec::with_capacity(header_len + keys.len() * 14);
+        for (bank, patch) in &keys {
+            let rec = self.map[&(*bank, *patch)].to_bytes();
+            let off = *stored.entry(rec).or_insert_with(|| {
+                let o = header_len + body.len();
+                body.extend_from_slice(&rec);
+                o
+            });
+            out.extend_from_slice(&[*patch, *bank]);
+            out.extend_from_slice(&(off as u32).to_le_bytes());
+        }
+        out.extend_from_slice(&[0xff, 0xff]);
+        out.extend_from_slice(&body);
+        out
+    }
+}
+
+impl Timbre {
+    /// The GTL record: u16 length 14, transpose, modulator, feedback/connection, carrier.
+    pub fn to_bytes(&self) -> [u8; 14] {
+        let m = self.modr;
+        let c = self.car;
+        [14, 0, self.transpose as u8, m[0], m[1], m[2], m[3], m[4], self.fbc, c[0], c[1], c[2], c[3], c[4]]
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -437,5 +471,20 @@ impl MusicPlayer {
         let (b, c) = Opl3::chan_base(v);
         self.opl.write(b | (0xa0 + c as u16), (bf & 0xff) as u8);
         self.opl.write(b | (0xb0 + c as u16), ((bf >> 8) as u8 & 0x1f) | if key { 0x20 } else { 0 });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn timbre_bank_round_trip() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/SOUND/SAMPLE.OPL");
+        let Ok(d) = std::fs::read(p) else { return };
+        let bank = TimbreBank::parse(&d).unwrap();
+        assert_eq!(bank.map.len(), 162);
+        let again = TimbreBank::parse(&bank.encode()).unwrap();
+        assert_eq!(bank.map, again.map);
     }
 }

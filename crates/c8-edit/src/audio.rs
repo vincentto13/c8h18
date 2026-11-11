@@ -1,11 +1,12 @@
 //! Sound output for previews: one sample or one tune at a time, on the default output device
 //! (opened on first use).
-use c8_audio::music::MusicPlayer;
+use c8_audio::tune::TunePlayer;
 use std::sync::{Arc, Mutex, OnceLock};
 
 enum Source {
     Sample { data: Arc<Vec<f32>>, rate: u32, pos: f64 },
-    Music(Box<MusicPlayer>),
+    /// An FM (XMIDI) or OGG tune.
+    Music(Box<TunePlayer>),
 }
 
 #[derive(Default)]
@@ -42,12 +43,17 @@ pub fn play_sample(tag: &str, data: Arc<Vec<f32>>, rate: u32) -> Result<(), Stri
     Ok(())
 }
 
-pub fn play_music(tag: &str, player: MusicPlayer) -> Result<(), String> {
+pub fn play_music(tag: &str, player: impl Into<TunePlayer>) -> Result<(), String> {
+    play_music_from(tag, player, 0.0)
+}
+
+/// Like [`play_music`] for a player already moved to `start` seconds (shown by [`playing`]).
+pub fn play_music_from(tag: &str, player: impl Into<TunePlayer>, start: f64) -> Result<(), String> {
     let o = output()?;
     let mut sh = o.shared.lock().unwrap_or_else(|e| e.into_inner());
-    sh.source = Some(Source::Music(Box::new(player)));
+    sh.source = Some(Source::Music(Box::new(player.into())));
     sh.tag = tag.into();
-    sh.played = 0.0;
+    sh.played = start;
     Ok(())
 }
 

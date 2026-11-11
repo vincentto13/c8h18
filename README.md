@@ -6,7 +6,8 @@ original data files in `resources/`.
 - Rendering: `wgpu` (Metal / Vulkan / DX12). Textures stay 8-bit palette indices and the shaders go
   through the per-track light table, so lighting and haze match the original. The 3D view uses the
   whole window, widescreen included. The 2D layer (menus, HUD) is drawn at 640×480 in palette space.
-- Audio: `cpal` with a software mixer. Music is XMIDI played on an emulated OPL3 using `SAMPLE.OPL`.
+- Audio: `cpal` with a software mixer. Music is XMIDI played on an emulated OPL3 using `SAMPLE.OPL`, or OGG
+  Vorbis files that replace tunes (see [Music](#music)).
 - Simulation: fixed 20 Hz tick, drawing interpolated between ticks; the front end runs at 70 frames/s.
 - The 320×200 mode and the network game are not included. Where the spec lists "port deviations",
   this version follows them.
@@ -19,7 +20,7 @@ A Cargo workspace with three crates:
 |---|---|---|
 | `crates/c8-data` | the data file formats (spec 01), read and write; shared by the game and the editor | |
 | `crates/c8-game` | the game | `c8h18` |
-| `crates/c8-audio` | sound and music banks (read and write), WAV samples, XMIDI tunes and the OPL3 music player, shared by the game and the editor | |
+| `crates/c8-audio` | sound and music banks (read and write), WAV samples, XMIDI tunes (read and write), Standard MIDI conversion, the GTL timbre bank (read and write), the OPL3 music player and OGG music, shared by the game and the editor | |
 | `crates/c8-render` | the level mesh (floor quads and block faces), the model triangles and the vertex format, shared by the game's renderer and the editor's 3D views | |
 | `crates/c8-edit` | level and resource editor (see `docs/editor-plan.md`) | `c8h18-edit` |
 
@@ -192,7 +193,9 @@ the file are kept.
 what the game uses them for; play samples and tunes (the FM tunes on the emulated OPL3, as in the
 game), show the waveform, export a sample as WAV, a tune as XMIDI or rendered to WAV, replace a
 sample from any PCM WAV (converted to 8-bit mono, in all three 8-bit formats at once) and a tune
-from an XMIDI file.
+from an XMIDI file. For music see also [Music](#music): each tune shows whether the game plays its
+XMIDI or an OGG replacement, and the side panel imports and removes OGGs, edits their loop points,
+exports `.mid` and imports a Standard MIDI file.
 
 **Explosion rings** (SRCH0-0) show the 32 × 32 grid of rings the big and massive explosions spread
 over, with each ring's walk order, start cell and unreached cells; paint cells into rings, move
@@ -296,84 +299,11 @@ exactly as before, but the glyphs are new. Play with them with `c8h18 --override
 
 ## Models
 
-Model files (`OBJECTS/DATA/*.DAT`; one model per file) open in a 3D view drawn the way the game
-draws them (the game's triangle builder from `c8-render`, palette and atlas through the chosen
-colour table). Drag to orbit, right/middle or Shift drag to pan, wheel or pinch to zoom; toggles
-for faces, wireframe, shading (to read the shape; the game has none) and axes (red right, green
-up, blue forward). Hovering a triangle shows its type, atlas entry or colour, vertices, shade bytes
-and UVs; clicking selects it to change its type, entry/colour and UVs, flip or delete it (undoable).
-The side panel lists vertices, triangles per type, texture entries, colours, bounds, size, flags
-and the format limits.
-
-**Blender**: *Export .glb* writes glTF 2.0 with the texture sheet (TEX0-0 with the palette applied)
-embedded as a PNG and unlit materials named after the triangle type and atlas entry or colour
-(`c8_t5_e12`, `c8_f4_c37`, also in the materials' `extras`). It imports upright and facing
-Blender's front (−Y); 1 m = 256 file units (a car is about 4 m). Import into Blender with the
-default options; edit; assign existing `c8_` materials to new faces and keep their UVs on the
-sheet; export as glTF Binary with *Include → Custom Properties* on. *Import…* reads .glb, .gltf
-(embedded buffers) or .obj back, rounds positions to file units, maps materials and UVs back to
-types and atlas entries (foreign materials: textured → type 5 with the entry found from the UVs,
-others → the nearest palette colour, type 0), and checks the limits (at most 256 vertices, as
-triangles address them with a byte; coordinates within ±128 m; UVs within 255 texels of the
-entry's corner). Unchanged geometry comes back byte-identical (the export carries the original
-file, and the open model is the template); changed geometry keeps the original vertex order,
-triangle order and shade bytes for what is still there. *Export .obj* writes OBJ + MTL + PNG
-with the same conventions. *Test in game* puts the model in a race on track 1 (TRACK0-* in the
-track-selection screen).
-
-Without a window:
-
-```
-c8h18-edit [--data <dir>] [--table 0..5] --export-model OBJECTS/DATA/CAR0-0.DAT car.glb   # or car.obj
-c8h18-edit [--data <dir>] [--like OBJECTS/DATA/CAR0-0.DAT] --import-model car.glb CAR0-0.DAT
-```
-
-`--override <dir>` takes files from `<dir>` (same layout as the data folder) first, like the game's
-option: e.g. `--override assets/models` exports with the new texture atlas and maps imported UVs
-to its entries.
-
-`cargo test -p c8-edit blender -- --ignored` runs every shipped model through Blender (needs
-`blender` on the PATH): glTF (Blender's default import) and OBJ come back byte-identical. With
-"Merge Vertices" on, Blender deletes zero-area triangles and the back of two-sided faces (MARSH0-0,
-SIGN0-0); everything else survives.
-
-### MCP (AI agents)
-
-The editor is also an MCP server, so an agent such as Claude Code can inspect and edit levels:
-- read cells, terrain, textures and light;
-- edit block columns, entities, wall and waypoint chains, and regions;
-- run the checks and the AI test;
-- see the level through top-down and 3D pictures.
-
-Every editing call is one undo step, labelled "MCP: …".
-
-- **Live, in the running editor.** The editor listens on `http://127.0.0.1:47811/mcp` (another
-  free port if that one is taken). It accepts this computer only and needs a bearer token.
-  - Click "MCP" in the status bar for the endpoint, the token, a "Copy Claude Code command" button
-    (`claude mcp add --transport http c8h18-edit <url> --header "Authorization: Bearer <token>"`),
-    a pause switch and the activity log.
-  - The agent works on the open level tabs, and you see its edits as they happen. Cmd+Z undoes them.
-  - The port and token are remembered; "New token" replaces the token.
-- **Headless.** `c8h18-edit mcp --data <game data> [--allow <folder>]... [level]` serves MCP over
-  stdio without a window, e.g.
-  `claude mcp add c8h18-edit -- c8h18-edit mcp --data /path/to/game --allow /path/to/tracks`.
-  - Levels are read from the data folder and the allowed folders, and written only into the
-    allowed folders (default: the current directory).
-  - The game data folder is never written in either mode.
-
-Tools:
-- `editor_status`, `level_open` (an original track as a template, or a file), `level_save`,
-  `level_info`;
-- `cells_read`, `cells_write`, `heights_fill`, `heights_ramp`, `heights_smooth`, `textures_fill`,
-  `light_fill`, `light_bake`, `texture_attr_set`;
-- `columns_list`, `block_define`, `column_define`, `column_place`, `column_clear`;
-- `entities_list`, `entity_add`, `entity_update`, `entity_delete`, `chain_add`;
-- `region_add`, `region_update`, `region_delete`;
-- `validate`, `ai_test`, `render_top`, `render_3d` (PNG images);
-- `history`, `undo`, `redo`.
-
-Resources: `docs://format` (units, layers, entity types, what a race needs), `level://summary`,
-`level://validation`. Prompts: `design-track`, `fix-validation`.
+`assets/models/OBJECTS/DATA` holds all 62 models made from scratch (48 crafts, recovery truck,
+cones, barrels, marshal car, sign, and the six track previews of the carousel, built from the level
+files) and a new object texture sheet with the original's layout. Play with them with
+`c8h18 --override assets/models`. They are written by a local generator, `modelgen/` (not in
+git; see its README, which also covers previews for custom levels).
 
 ## Sound effects
 
@@ -386,6 +316,53 @@ The game takes each SOUND.DAT bank from slot 0 (16-bit 44.1 kHz) when the file h
 falls back to slot 3 (8-bit 22 kHz) otherwise, so the original file plays as before (spec 09 §9).
 The editor's sound panel shows every slot the file has; "Replace from WAV…" converts to the slot's
 format (16-bit 44.1 kHz in slot 0), in every slot of the bank at once with "Replace in all formats".
+
+## Music
+
+`assets/music/SOUND` holds new music composed from scratch, as FM tunes like the original's:
+`MUSIC.DAT` (the five tunes in the FM slot) and `SAMPLE.OPL` / `SAMPLE.AD` (our own two-operator
+timbre bank, with a timbre for every General MIDI program and a percussion bank). Play with them
+with `c8h18 --override assets/music`. The tunes are written by a local generator, `musicgen/`
+(not in git; see its README).
+
+**OGG replacements.** Any tune can be replaced by a recording: put an OGG Vorbis file named after
+the tune in `SOUND/MUSIC/` of the data folder or of an `--override` folder:
+
+| Tune | Plays | File |
+|---|---|---|
+| 1 | race, tracks 1–2 | `SOUND/MUSIC/TGAME1.OGG` |
+| 2 | race, tracks 3–4 | `SOUND/MUSIC/TGAME2.OGG` |
+| 3 | race, tracks 5–6 | `SOUND/MUSIC/TGAME4.OGG` |
+| 4 | intro movie | `SOUND/MUSIC/TINTRO2.OGG` |
+| 5 | (unused) | `SOUND/MUSIC/TGAME3.OGG` |
+
+The file loops between the Vorbis comments `LOOPSTART` and `LOOPSTART + LOOPLENGTH` (or `LOOPEND`),
+in samples; without them the whole file loops. Any sample rate, mono or stereo; it plays at the
+music volume, at half amplitude so a full-scale recording sits with the sound effects like the FM
+music does. For example, with the loop starting at 12.5 s and lasting 96 s at 44.1 kHz:
+
+```
+ffmpeg -i tune.wav -c:a libvorbis -q:a 6 -metadata LOOPSTART=551250 -metadata LOOPLENGTH=4233600 TGAME1.OGG
+```
+
+(an ffmpeg without libvorbis has its own encoder: `-c:a vorbis -strict -2`). In the editor, open
+`SOUND/MUSIC.DAT`, select a tune and use "Use OGG…": the file is written to `MUSIC/<name>.OGG` beside
+the MUSIC.DAT when you save it (the game data folder itself is never written: saving there asks for
+another place, e.g. `assets/music/SOUND/MUSIC.DAT`), and "Test in game" takes it along. The panel
+shows the loop over the waveform, edits it in samples ("Play loop seam" plays the last 3 s before
+the jump), and "Remove OGG" goes back to XMIDI. "Export as WAV…" writes the OGG decoded, or the
+XMIDI rendered on the OPL3 (48 kHz, up to the loop end of a second pass so the loop is seamless)
+with the loop in a `smpl` chunk and the `LOOPSTART`/`LOOPLENGTH` values to use.
+
+**MIDI.** Bring your own tune as a Standard MIDI file: General MIDI programs (each maps to a timbre
+of the bank), drums on channel 10, and the loop from `loopStart` / `loopEnd` markers (or controller
+111; otherwise the whole piece loops). "Replace from MIDI…" in the editor converts it, and so does
+the command line:
+
+```
+c8h18-edit --midi-to-xmi tune.mid TGAME1.XMI [--no-loop]   # note-offs → durations, ticks → 1/120 s, loop → FOR/NEXT
+c8h18-edit --xmi-to-midi TGAME1.XMI tune.mid               # for MuseScore, LMMS or a DAW
+```
 
 ## Debug automation
 
