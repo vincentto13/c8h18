@@ -401,6 +401,78 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
+name = "c8-audio"
+version = "0.1.0"
+dependencies = [
+ "c8-data",
+ "lewton",
+ "log",
+ "ogg",
+ "oplon",
+]
+
+[[package]]
+name = "c8-data"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "log",
+ "png",
+ "zip",
+]
+
+[[package]]
+name = "c8-edit"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "bytemuck",
+ "c8-audio",
+ "c8-data",
+ "c8-render",
+ "cpal",
+ "eframe",
+ "env_logger",
+ "gltf",
+ "log",
+ "png",
+ "pollster",
+ "rfd",
+ "rmcp",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "c8-game"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "c8-audio",
+ "c8-data",
+ "c8-render",
+ "cpal",
+ "env_logger",
+ "gilrs",
+ "glam",
+ "log",
+ "png",
+ "pollster",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "c8-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "c8-data",
+]
+
+[[package]]
 name = "calloop"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1543,78 +1615,6 @@ name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
-
-[[package]]
-name = "c8-audio"
-version = "0.1.0"
-dependencies = [
- "c8-data",
- "lewton",
- "log",
- "ogg",
- "oplon",
-]
-
-[[package]]
-name = "c8-data"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "log",
- "png",
- "zip",
-]
-
-[[package]]
-name = "c8-edit"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "bytemuck",
- "cpal",
- "eframe",
- "env_logger",
- "gltf",
- "c8-audio",
- "c8-data",
- "c8-render",
- "log",
- "png",
- "pollster",
- "rfd",
- "rmcp",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "c8-game"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "cpal",
- "env_logger",
- "gilrs",
- "glam",
- "c8-audio",
- "c8-data",
- "c8-render",
- "log",
- "png",
- "pollster",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "c8-render"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "c8-data",
-]
 
 [[package]]
 name = "http"

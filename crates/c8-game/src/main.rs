@@ -473,6 +473,25 @@ impl ApplicationHandler for App {
     }
 }
 
+/// Choose the asset package and its save folder (see `c8_data::locate`) and make it current.
+fn use_package(asset: Option<&std::path::Path>) {
+    let r = data::locate::resolve(asset, &data::locate::Env::system());
+    for w in &r.warnings {
+        println!("warning: {w}");
+    }
+    log::info!("asset package {} ({:?}, name {:?}), saves in {}", r.path.display(), r.origin, r.name, r.save_dir.display());
+    match data::locate::migrate_saves(&r) {
+        Ok(Some(old)) => println!("copied the saves from {} to {}", old.display(), r.save_dir.display()),
+        Ok(None) => {}
+        Err(e) => println!("warning: cannot copy the old saves: {e}"),
+    }
+    let p = data::package::Package::open(&r.path).unwrap_or_else(|e| {
+        println!("warning: {e}: no assets can be loaded");
+        data::package::Package::dir(r.path.clone())
+    });
+    data::files::set_package(p.with_save_dir(r.save_dir));
+}
+
 fn main() {
     env_logger::init();
     let mut opts = Opts { sound: true, intro: true, race: None };
@@ -527,25 +546,18 @@ fn main() {
             i += 1;
         } else if l == "-h" || l == "--help" {
             println!("usage: c8h18 [--asset <dir|file.c8pak>] [-s|--silent] [--no-intro] [--lang <code>] [--speed <25..400>]");
-            println!("                [--race <1..6> | --demo <1..6>] [--level <file>] [--sim <track> <ticks>]");
+            println!("             [--race <1..6> | --demo <1..6>] [--level <file>] [--sim <track> <ticks>]");
             println!("  --asset   the asset package: a directory with the original layout (DATA/, MAPS/, OBJECTS/, SOUND/,");
-            println!("            lang/) or a .c8pak bundle of one (default: resources); also `--data <path>`, a bare");
-            println!("            <path> or the GAME_DATA environment variable");
+            println!("            lang/) or a .c8pak bundle of one; also `--data <path>` or a bare <path>. Without it:");
+            println!("            $C8H18_ASSET or $GAME_DATA, then `package = <name>` in {},", data::locate::Env::system().settings_path().display());
+            println!("            then the shipped {}", data::locate::SHIPPED_PACKAGE);
             return;
         } else if !l.starts_with('-') {
             asset = Some(a.into());
         }
         i += 1;
     }
-    if let Ok(d) = std::env::var("GAME_DATA") {
-        asset = Some(d.into());
-    }
-    if let Some(p) = asset
-        && let Err(e) = data::files::set_asset(&p)
-    {
-        println!("warning: {e}: no assets can be loaded");
-        data::files::set_data_dir(p);
-    }
+    use_package(asset.as_deref());
     if let Some((t, n)) = sim {
         let rings = data::images::load_search_rings_or_generate();
         race::headless(t, n, rings, true);

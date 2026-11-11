@@ -16,6 +16,8 @@ pub const BUNDLE_EXT: &str = "c8pak";
 pub struct Package {
     path: PathBuf,
     src: Source,
+    /// Where saves go, when chosen by [`crate::locate::resolve`].
+    save: Option<PathBuf>,
 }
 
 enum Source {
@@ -45,7 +47,7 @@ fn clean_rel(rel: &str) -> Option<String> {
 impl Package {
     /// A directory package (not checked).
     pub fn dir(path: PathBuf) -> Package {
-        Package { path, src: Source::Dir }
+        Package { path, src: Source::Dir, save: None }
     }
 
     /// Open a directory or a bundle (any regular file is read as a zip).
@@ -71,7 +73,7 @@ impl Package {
                 _ => println!("warning: {}: ignoring unsafe entry {name:?} (absolute path or ..)", path.display()),
             }
         }
-        Ok(Package { path: path.to_path_buf(), src: Source::Bundle(Bundle { zip: Mutex::new(zip), names }) })
+        Ok(Package { path: path.to_path_buf(), src: Source::Bundle(Bundle { zip: Mutex::new(zip), names }), save: None })
     }
 
     /// The directory or bundle file.
@@ -159,19 +161,27 @@ impl Package {
         }
     }
 
-    /// The writable folder for `config.dat`, saves, key and video settings: `save/` inside a
-    /// directory package; for a bundle `<user data>/c8h18/<bundle file stem>/save` (see
-    /// [`user_data_dir`]). `C8H18_SAVE_DIR` replaces both. Never inside a bundle.
+    /// Send saves to `dir` (see [`Package::save_dir`]).
+    pub fn with_save_dir(mut self, dir: PathBuf) -> Package {
+        self.save = Some(dir);
+        self
+    }
+
+    /// The writable folder for `config.dat`, saves, key and video settings: `C8H18_SAVE_DIR`
+    /// when set, else the folder given with [`Package::with_save_dir`] (the
+    /// game sets it from [`crate::locate::resolve`]), else `save/` inside a directory package
+    /// and `<user dir>/save/<bundle file stem>` for a bundle. Never inside a bundle.
     pub fn save_dir(&self) -> PathBuf {
-        if let Some(d) = std::env::var_os("C8H18_SAVE_DIR").filter(|d| !d.is_empty()) {
-            return PathBuf::from(d);
+        let env = crate::locate::Env::system();
+        if let Some(d) = env.save_dir_override() {
+            return d;
+        }
+        if let Some(d) = &self.save {
+            return d.clone();
         }
         match &self.src {
             Source::Dir => self.path.join("save"),
-            Source::Bundle(_) => {
-                let stem = self.path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "bundle".into());
-                user_data_dir().join(stem).join("save")
-            }
+            Source::Bundle(_) => env.package_save_dir(&crate::locate::package_name(&self.path)),
         }
     }
 }
@@ -192,20 +202,6 @@ fn list_dir(dir: &Path, prefix: &str, out: &mut Vec<String>) {
         } else if p.is_file() {
             out.push(rel);
         }
-    }
-}
-
-/// The per-user folder for writable data of bundles: `~/Library/Application Support/c8h18`
-/// on macOS, `%APPDATA%\c8h18` on Windows, `$XDG_DATA_HOME/c8h18` (default
-/// `~/.local/share/c8h18`) elsewhere.
-pub fn user_data_dir() -> PathBuf {
-    let home = || std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-    if cfg!(target_os = "macos") {
-        home().join("Library/Application Support/c8h18")
-    } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(home).join("c8h18")
-    } else {
-        std::env::var_os("XDG_DATA_HOME").filter(|d| !d.is_empty()).map(PathBuf::from).unwrap_or_else(|| home().join(".local/share")).join("c8h18")
     }
 }
 

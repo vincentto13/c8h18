@@ -5,6 +5,7 @@
 pub mod rnc;
 pub mod files;
 pub mod package;
+pub mod locate;
 pub mod tables;
 pub mod sprites;
 pub mod images;

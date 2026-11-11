@@ -345,9 +345,13 @@ mod tests {
                 assert!(t.uv.iter().all(|&(u, v)| (u as u32) < w && (v as u32) < h), "{name}: UVs {:?} outside entry {} ({w} x {h})", t.uv, t.col);
             }
         };
-        let mut n = 0;
+        // previews of tracks 2..6 are optional: our package has only track 1
+        let optional = |n: &str| n.starts_with("TRACK0-") && n != "TRACK0-0";
+        let (mut n, mut skipped) = (0, 0);
         for name in model_files() {
             let Ok(raw) = std::fs::read(dir.join(format!("{name}.DAT"))) else {
+                assert!(optional(&name), "{name} missing from assets/custom");
+                skipped += 1;
                 if let Some(o) = objects() {
                     fits(&Model::parse(&std::fs::read(o.join(format!("{name}.DAT"))).unwrap()).unwrap(), &name);
                 }
@@ -359,7 +363,7 @@ mod tests {
             fits(&m, &name);
             n += 1;
         }
-        assert_eq!(n, model_files().len(), "models in assets/custom");
+        assert_eq!(n + skipped, model_files().len(), "models in assets/custom");
     }
 
     #[test]
