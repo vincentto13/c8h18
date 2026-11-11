@@ -19,7 +19,7 @@ pub struct Viewer {
 }
 
 fn rgb_palette() -> [[u8; 3]; 256] {
-    Palette::load().map(|p| p.vga.map(|c| c.map(|v| (v as u32 * 255 / 63) as u8))).unwrap_or_else(|_| std::array::from_fn(|i| [i as u8; 3]))
+    Palette::load_or_builtin().vga.map(|c| c.map(|v| (v as u32 * 255 / 63) as u8))
 }
 
 impl Viewer {

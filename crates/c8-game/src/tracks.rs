@@ -1,29 +1,26 @@
 //! Which of the six tracks are present (port addition, spec 02 §17).
 //!
-//! A track counts as available when all its own files can be found through the normal lookup
-//! (`--override` folder first, then the data folder); see [`required_files`]. The original set
-//! has all six, so everything below is the identity there. Track numbers here are 0-based
-//! (track t of the spec is index t - 1), as the config's race number is.
+//! A track counts as available when its level file `MAPS/LEVEL0-t.DAT` can be found through the
+//! normal lookup (the package, any letter case). Its terrain textures, sky and colour table are
+//! optional: missing ones are replaced when the race loads (placeholder textures, a gradient
+//! sky, a table computed from the palette), each with a warning. The original set has all six,
+//! so everything below is the identity there. Track numbers here are 0-based (track t of the
+//! spec is index t - 1), as the config's race number is.
 use std::sync::OnceLock;
 
 /// Number of track slots the game knows (names, lap tables, records, models 50..55).
 pub const SLOTS: usize = 6;
 
-/// The files track `t` (0-based) must have to be offered: its level and the terrain textures,
-/// sky and colour table its race loads. Its preview model (OBJECTS/DATA/TRACK0-t.DAT) and its
-/// minimap pictures in DATA/TRACK0-1 are optional: without them the carousel and HUD draw nothing.
-pub fn required_files(t: usize) -> [String; 4] {
-    [
-        format!("MAPS/LEVEL0-{}.DAT", t + 1),
-        format!("DATA/TEXTU0-{t}.DAT"),
-        format!("DATA/SKY0-{t}.DAT"),
-        format!("DATA/TABLE0-{t}.DAT"),
-    ]
+/// The file track `t` (0-based) must have to be offered: its level. Its textures, sky, colour
+/// table, preview model (OBJECTS/DATA/TRACK0-t.DAT) and minimap pictures in DATA/TRACK0-1 are
+/// optional.
+pub fn level_file(t: usize) -> String {
+    format!("MAPS/LEVEL0-{}.DAT", t + 1)
 }
 
-/// The tracks whose required files all exist according to `exists`, in track order.
+/// The tracks whose level exists according to `exists`, in track order.
 pub fn discover(exists: impl Fn(&str) -> bool) -> Vec<usize> {
-    (0..SLOTS).filter(|&t| required_files(t).iter().all(|f| exists(f))).collect()
+    (0..SLOTS).filter(|&t| exists(&level_file(t))).collect()
 }
 
 static AVAILABLE: OnceLock<Vec<usize>> = OnceLock::new();
@@ -31,12 +28,9 @@ static AVAILABLE: OnceLock<Vec<usize>> = OnceLock::new();
 /// The available tracks (looked up once, on first use).
 pub fn available() -> &'static [usize] {
     AVAILABLE.get_or_init(|| {
-        let v = discover(|f| crate::data::files::resolve(f).is_some_and(|p| p.is_file()));
-        if v.len() < SLOTS {
-            for t in (0..SLOTS).filter(|t| !v.contains(t)) {
-                let missing: Vec<String> = required_files(t).into_iter().filter(|f| crate::data::files::resolve(f).is_none()).collect();
-                log::info!("track {} not available (missing {})", t + 1, missing.join(", "));
-            }
+        let v = discover(crate::data::files::exists);
+        for t in (0..SLOTS).filter(|t| !v.contains(t)) {
+            crate::data::files::warn_asset(&level_file(t), None, &format!("track {} is not available", t + 1));
         }
         if v.is_empty() {
             log::error!("no track is available: races cannot be started");
@@ -89,18 +83,18 @@ mod tests {
         for sub in ["MAPS", "DATA"] {
             std::fs::create_dir_all(d.join(sub)).unwrap();
         }
-        // track 2 (index 1) complete, in mixed case like a hand-made folder
+        // track 2 (index 1) with everything, in mixed case like a hand-made folder
         for f in ["MAPS/level0-2.dat", "DATA/TEXTU0-1.DAT", "DATA/sky0-1.dat", "DATA/TABLE0-1.DAT"] {
             std::fs::write(d.join(f), b"x").unwrap();
         }
-        // track 4 (index 3) without its sky: not available
-        for f in ["MAPS/LEVEL0-4.DAT", "DATA/TEXTU0-3.DAT", "DATA/TABLE0-3.DAT"] {
+        // track 4 (index 3): only its level, still available (the rest has fallbacks)
+        std::fs::write(d.join("MAPS/LEVEL0-4.DAT"), b"x").unwrap();
+        // textures, sky and table without a level do not make track 1 available
+        for f in ["DATA/TEXTU0-0.DAT", "DATA/SKY0-0.DAT", "DATA/TABLE0-0.DAT"] {
             std::fs::write(d.join(f), b"x").unwrap();
         }
-        // the front-end colour table alone does not make track 1 available
-        std::fs::write(d.join("DATA/TABLE0-0.DAT"), b"x").unwrap();
         let found = discover(|f| resolve_in(d.clone(), f).is_some());
-        assert_eq!(found, vec![1]);
+        assert_eq!(found, vec![1, 3]);
         let _ = std::fs::remove_dir_all(&d);
     }
 

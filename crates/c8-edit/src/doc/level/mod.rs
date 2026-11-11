@@ -64,9 +64,16 @@ struct Look {
 
 impl Look {
     fn load(set: usize) -> Look {
-        let pal = Palette::load().map(|p| p.vga.map(|c| c.map(|v| (v as u32 * 255 / 63) as u8))).unwrap_or([[128; 3]; 256]);
-        let table = ColourTable::load(set).ok();
-        let tex = load_terrain_textures(set).unwrap_or_else(|_| vec![0; 1 << 20]);
+        let palette = Palette::load_or_builtin();
+        let pal = palette.vga.map(|c| c.map(|v| (v as u32 * 255 / 63) as u8));
+        let tex = load_terrain_textures(set).unwrap_or_else(|e| {
+            c8_data::files::warn_asset(&format!("data/textu0-{set}.dat"), Some(&e), "using generated placeholder textures");
+            c8_data::images::placeholder_textures(&palette)
+        });
+        let table = Some(ColourTable::load(set).unwrap_or_else(|e| {
+            c8_data::files::warn_asset(&format!("data/table0-{set}.dat"), Some(&e), "computing the colour table from the palette");
+            ColourTable::from_bytes(&c8_data::tables::build_with_textures(&palette, c8_data::images::FALLBACK_HAZE, Some(&tex)))
+        }));
         let thumbs = (0..256)
             .map(|t| {
                 std::array::from_fn(|o| {

@@ -35,7 +35,10 @@ impl McpPrefs {
 }
 
 pub struct EditorApp {
+    /// the asset package: a game data folder or a `.c8pak` bundle
     data_dir: Option<PathBuf>,
+    /// a bundle's files unpacked for the documents (see `resources::refresh_mirror`)
+    mirror: Option<PathBuf>,
     entries: Vec<Entry>,
     filter: String,
     docs: Vec<Box<dyn Document>>,
@@ -61,6 +64,7 @@ impl EditorApp {
         let mcp_prefs = McpPrefs::load(cc.storage);
         let mut app = EditorApp {
             data_dir: None,
+            mirror: None,
             entries: Vec::new(),
             filter: String::new(),
             docs: Vec::new(),
@@ -83,7 +87,9 @@ impl EditorApp {
             app.set_data_dir(d);
         }
         if let Some(p) = open {
-            app.open_path(p);
+            // a path inside the package (e.g. MAPS/LEVEL0-1.DAT, also for a bundle) when it is not a file here
+            let in_pkg = (!p.is_file()).then(|| app.files_root().and_then(|r| c8_data::files::resolve_in(r.clone(), &p.to_string_lossy()))).flatten();
+            app.open_path(in_pkg.unwrap_or(p));
         }
         app
     }
@@ -167,17 +173,51 @@ impl EditorApp {
     }
 
     fn set_data_dir(&mut self, d: PathBuf) {
-        if !resources::is_data_dir(&d) {
-            self.status = format!("{} is not a game data folder (no DATA/PALET0-0.DAT and MAPS/)", d.display());
-            if let Some(old) = &self.data_dir {
-                c8_data::files::set_data_dir(old.clone());
+        let Some(pkg) = resources::probe(&d) else {
+            self.status = format!("{} is not an asset package (a folder or .c8pak bundle with DATA/, MAPS/ or OBJECTS/)", d.display());
+            return;
+        };
+        let mirror = if pkg.is_bundle() {
+            match resources::refresh_mirror(&d) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    self.status = format!("cannot unpack {}: {e}", d.display());
+                    return;
+                }
             }
+        } else {
+            None
+        };
+        c8_data::files::set_package(pkg);
+        self.entries = resources::scan(mirror.as_ref().unwrap_or(&d));
+        self.status = format!("{} {}: {} files", if mirror.is_some() { "bundle" } else { "data folder" }, d.display(), self.entries.len());
+        self.data_dir = Some(d);
+        self.mirror = mirror;
+    }
+
+    /// Where the package's files are as local files: the data folder, or a bundle's mirror.
+    fn files_root(&self) -> Option<&PathBuf> {
+        self.mirror.as_ref().or(self.data_dir.as_ref())
+    }
+
+    /// Save the active document into the open bundle: written into the bundle's mirror, then the
+    /// mirror is packed into a temporary file renamed over the bundle (atomic).
+    fn save_into_bundle(&mut self) {
+        let (Some(bundle), Some(mirror)) = (self.data_dir.clone(), self.mirror.clone()) else { return };
+        let Some(d) = self.docs.get_mut(self.active) else { return };
+        let Some(path) = d.path().map(Path::to_path_buf).filter(|p| p.starts_with(&mirror)) else {
+            self.status = format!("{} is not a file of the bundle", d.title());
+            return;
+        };
+        if !d.can_save() {
+            self.status = format!("{} cannot be saved yet", d.title());
             return;
         }
-        c8_data::files::set_data_dir(d.clone());
-        self.entries = resources::scan(&d);
-        self.status = format!("data folder {}: {} files", d.display(), self.entries.len());
-        self.data_dir = Some(d);
+        let res = d.save_to(&path).and_then(|()| resources::repack_mirror(&bundle)).and_then(|n| c8_data::files::set_asset(&bundle).map(|()| n));
+        self.status = match res {
+            Ok(n) => format!("saved {} into {} ({n} files)", path.strip_prefix(&mirror).unwrap_or(&path).display(), bundle.display()),
+            Err(e) => format!("save failed: {e}"),
+        };
     }
 
     fn open_path(&mut self, path: PathBuf) {
@@ -186,8 +226,7 @@ impl EditorApp {
             return;
         }
         let rel = self
-            .data_dir
-            .as_ref()
+            .files_root()
             .and_then(|d| path.strip_prefix(d).ok())
             .map(|r| r.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
@@ -202,9 +241,10 @@ impl EditorApp {
         }
     }
 
-    /// Files inside the game data folder are the originals: saving them asks for a new name.
+    /// Files inside the game data folder (or the open bundle) are the originals: saving them
+    /// asks for a new name (or File > Save into bundle).
     fn is_original(&self, p: &Path) -> bool {
-        self.data_dir.as_ref().is_some_and(|d| p.starts_with(d))
+        self.data_dir.as_ref().is_some_and(|d| p.starts_with(d)) || self.mirror.as_ref().is_some_and(|m| p.starts_with(m))
     }
 
     fn save(&mut self, save_as: bool) {
@@ -240,6 +280,11 @@ impl EditorApp {
                         self.set_data_dir(d);
                     }
                 }
+                if ui.button("Asset bundle…").on_hover_text("A .c8pak file: the game's files zipped in the original layout").clicked()
+                    && let Some(d) = rfd::FileDialog::new().add_filter("Asset bundle", &[c8_data::package::BUNDLE_EXT]).pick_file()
+                {
+                    self.set_data_dir(d);
+                }
                 if ui.button("Open file…").clicked() {
                     if let Some(p) = rfd::FileDialog::new().pick_file() {
                         self.open_path(p);
@@ -251,6 +296,10 @@ impl EditorApp {
                 }
                 if ui.add_enabled(!self.docs.is_empty(), egui::Button::new("Save as…").shortcut_text("⇧⌘S")).clicked() {
                     self.save(true);
+                }
+                let in_bundle = self.mirror.as_ref().is_some_and(|m| self.docs.get(self.active).and_then(|d| d.path()).is_some_and(|p| p.starts_with(m)));
+                if ui.add_enabled(in_bundle, egui::Button::new("Save into bundle")).on_hover_text("Rewrite the open .c8pak bundle with this file replaced").clicked() {
+                    self.save_into_bundle();
                 }
                 if ui.add_enabled(!self.docs.is_empty(), egui::Button::new("Close").shortcut_text("⌘W")).clicked() {
                     self.request_close(self.active);
@@ -344,11 +393,16 @@ impl EditorApp {
                 ui.label(egui::RichText::new(d.display().to_string()).small().color(Color32::GRAY));
             }
             None => {
-                ui.label("Choose the game data folder (the one with DATA/, MAPS/, OBJECTS/, SOUND/).");
+                ui.label("Choose the game data folder (the one with DATA/, MAPS/, OBJECTS/, SOUND/) or a .c8pak asset bundle.");
                 if ui.button("Choose folder…").clicked() {
                     if let Some(d) = rfd::FileDialog::new().pick_folder() {
                         self.set_data_dir(d);
                     }
+                }
+                if ui.button("Choose bundle…").clicked()
+                    && let Some(d) = rfd::FileDialog::new().add_filter("Asset bundle", &[c8_data::package::BUNDLE_EXT]).pick_file()
+                {
+                    self.set_data_dir(d);
                 }
                 return;
             }

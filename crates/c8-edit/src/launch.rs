@@ -1,5 +1,6 @@
 //! "Test in game": start the game with edited files in an override folder, so the originals in
-//! the data folder stay untouched.
+//! the asset package (a data folder or a `.c8pak` bundle) stay untouched. The game gets
+//! `--asset <package> --override <folder>` plus the document's own arguments.
 use crate::doc::Document;
 use std::path::PathBuf;
 
@@ -32,16 +33,40 @@ pub fn test_in_game(docs: &[Box<dyn Document>], active: usize) -> Result<String,
             written.push(rel);
         }
     }
-    let args = docs.get(active).map(|d| d.game_args()).unwrap_or_default();
-    let data = c8_data::files::data_dir();
-    let data = data.canonicalize().unwrap_or(data);
+    let args = game_command_args(&c8_data::files::data_dir(), &dir, docs.get(active).map(|d| d.game_args()).unwrap_or_default());
     let exe = game_exe();
     std::process::Command::new(&exe)
-        .arg(&data)
-        .arg("--override")
-        .arg(&dir)
         .args(&args)
         .spawn()
         .map_err(|e| format!("cannot start {}: {e} (build it with `cargo build --release --workspace`)", exe.display()))?;
     Ok(if written.is_empty() { "started the game with the original files".into() } else { format!("started the game with {}", written.join(", ")) })
+}
+
+/// The game's arguments for "Test in game": the package `data` (folder or bundle, made
+/// absolute), the override folder with the edited files, then the document's own arguments.
+pub fn game_command_args(data: &std::path::Path, override_dir: &std::path::Path, doc_args: Vec<String>) -> Vec<std::ffi::OsString> {
+    let data = data.canonicalize().unwrap_or_else(|_| data.to_path_buf());
+    let mut v: Vec<std::ffi::OsString> = vec!["--asset".into(), data.into(), "--override".into(), override_dir.into()];
+    v.extend(doc_args.into_iter().map(Into::into));
+    v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_in_game_arguments_name_the_bundle() {
+        let base = std::env::temp_dir().join(format!("c8-launch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("pkg/MAPS")).unwrap();
+        std::fs::write(base.join("pkg/MAPS/LEVEL0-1.DAT"), b"x").unwrap();
+        let bundle = base.join("my.c8pak");
+        c8_data::package::pack(&base.join("pkg"), &bundle).unwrap();
+        let data = bundle.canonicalize().unwrap();
+        let got = game_command_args(&bundle, &override_dir(), vec!["--race".into(), "1".into()]);
+        let want: Vec<std::ffi::OsString> = vec!["--asset".into(), data.into(), "--override".into(), override_dir().into(), "--race".into(), "1".into()];
+        assert_eq!(got, want);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }

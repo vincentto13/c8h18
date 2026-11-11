@@ -81,7 +81,7 @@ impl LangDoc {
             let d = std::fs::read(&p).or_else(|_| c8_data::files::read_raw("lang/en.txt").map_err(|e| std::io::Error::other(e)));
             d.ok().map(|d| LangFile::parse(&String::from_utf8_lossy(&d)))
         };
-        let font = Font::load("olfnt0-1", true).ok();
+        let font = Font::load("olfnt0-1", true).map_err(|e| c8_data::files::warn_asset("data/olfnt0-1.dat", Some(&e), "no in-game preview")).ok();
         Ok(LangDoc { path, rel, code, file, en, history: History::default(), pending: None, sel: None, filter: Filter::All, search: String::new(), font, preview: None, scroll_to: None, test: false })
     }
 

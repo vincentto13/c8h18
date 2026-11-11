@@ -215,7 +215,7 @@ stops all samples and shuts the sound system down; the music does not carry over
 - The port loops the race tune and the intro tune.
 - **OGG music** (port addition): an OGG Vorbis file named after a tune, `SOUND/MUSIC/<name>.OGG` with `<name>` =
   TGAME1, TGAME2, TGAME4, TINTRO2 or TGAME3 by tune number (section 5), replaces that tune's XMIDI. It is looked up
-  like every data file (the `--override` folder first, any letter case). It loops between the Vorbis comments
+  like every data file (in the asset package, folder or bundle, any letter case). It loops between the Vorbis comments
   `LOOPSTART` and `LOOPSTART + LOOPLENGTH` (or `LOOPEND`, exclusive), counted in samples from the start of the file;
   without `LOOPSTART` the whole file loops. Any sample rate (resampled to the output), mono or stereo (more channels
   are folded to stereo). It plays at half amplitude times the music volume, so a full-scale recording peaks where

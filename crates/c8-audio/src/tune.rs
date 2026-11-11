@@ -2,7 +2,7 @@
 //!
 //! A tune is the XMIDI item of MUSIC.DAT (slot 2) played on the emulated OPL3, unless an OGG
 //! Vorbis file named after the tune exists: `SOUND/MUSIC/<NAME>.OGG` (e.g.
-//! `SOUND/MUSIC/TGAME1.OGG`), looked up like every data file (override folder first, any
+//! `SOUND/MUSIC/TGAME1.OGG`), looked up like every data file (in the asset package, any
 //! letter case). Then the OGG plays instead, looping by its `LOOPSTART`/`LOOPLENGTH` comments
 //! (see [`crate::ogg`]).
 use crate::music::{MusicPlayer, TimbreBank};
@@ -23,9 +23,16 @@ pub fn ogg_rel(tune: usize) -> Option<String> {
     tune_name(tune).map(|n| format!("SOUND/MUSIC/{n}.OGG"))
 }
 
-/// The OGG replacement of tune `tune`, if there is one (override folder first, then the data folder).
+/// The local file of tune `tune`'s OGG replacement, if there is one (override folder first, then
+/// a directory package; `None` for one inside a bundle, see [`ogg_in_package`]).
 pub fn find_ogg(tune: usize) -> Option<PathBuf> {
     c8_data::files::resolve(&ogg_rel(tune)?).filter(|p| p.is_file())
+}
+
+/// The data path of tune `tune`'s OGG replacement if the override folder or the package (a
+/// directory or a bundle) has one; read it with `c8_data::files::read_raw`.
+pub fn ogg_in_package(tune: usize) -> Option<String> {
+    ogg_rel(tune).filter(|r| c8_data::files::exists(r))
 }
 
 /// A playing tune: FM (XMIDI on the OPL3) or OGG.
@@ -210,12 +217,12 @@ mod tests {
         assert!(r.frames[a..b].iter().any(|x| x.abs() > 0.01), "silent");
     }
 
-    /// The music made from scratch (assets/music, written by musicgen) is complete: five FM
+    /// The music made from scratch (assets/custom/SOUND, written by musicgen) is complete: five FM
     /// tunes in MUSIC.DAT slot 2 with FOR/NEXT loops, and a timbre bank holding every timbre
     /// they use, SAMPLE.AD = SAMPLE.OPL.
     #[test]
     fn new_music_assets_parse() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/music/SOUND");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/custom/SOUND");
         let (Ok(dat), Ok(opl)) = (std::fs::read(dir.join("MUSIC.DAT")), std::fs::read(dir.join("SAMPLE.OPL"))) else { return };
         assert_eq!(std::fs::read(dir.join("SAMPLE.AD")).unwrap(), opl);
         let bank = TimbreBank::parse(&opl).unwrap();

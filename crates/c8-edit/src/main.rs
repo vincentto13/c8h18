@@ -1,9 +1,11 @@
 //! c8h18-edit: level and resource editor for the game.
 //!
-//!   c8h18-edit [--data <game data folder>] [<file to open>]
+//!   c8h18-edit [--asset <dir|file.c8pak>] [<file to open>]
+//!   c8h18-edit --pack <dir> <out.c8pak> | --unpack <in.c8pak> <dir>
 //!
-//! The editor reads the original data files from the game data folder (DATA/, MAPS/, OBJECTS/,
-//! SOUND/), chosen on the first start and remembered. Each opened file is a document: levels,
+//! The editor reads the game's files from an asset package: a game data folder (DATA/, MAPS/,
+//! OBJECTS/, SOUND/, lang/) or a `.c8pak` bundle of one, chosen on the first start and
+//! remembered. Each opened file is a document: levels,
 //! textures, fonts, sprites, pictures and the palette have editors, other kinds open in a viewer
 //! (see `docs/editor-plan.md`).
 mod app;
@@ -39,6 +41,28 @@ fn main() -> eframe::Result {
             }
         }
     }
+    if let Some(i) = all.iter().position(|a| a == "--pack" || a == "--unpack") {
+        let (Some(from), Some(to)) = (all.get(i + 1), all.get(i + 2)) else {
+            eprintln!("c8h18-edit: {} takes <from> <to>", all[i]);
+            std::process::exit(1);
+        };
+        let (from, to) = (PathBuf::from(from), PathBuf::from(to));
+        let res = if all[i] == "--pack" {
+            c8_data::package::pack(&from, &to).map(|n| format!("packed {n} files of {} into {}", from.display(), to.display()))
+        } else {
+            c8_data::package::unpack(&from, &to).map(|n| format!("unpacked {n} files of {} into {}", from.display(), to.display()))
+        };
+        match res {
+            Ok(msg) => {
+                println!("{msg}");
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("c8h18-edit: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     if all.iter().any(|a| a == "--export-model" || a == "--import-model") {
         match run_model_cli(all) {
             Ok(msg) => {
@@ -53,15 +77,20 @@ fn main() -> eframe::Result {
     }
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--data" => data = args.next().map(PathBuf::from),
+            "--asset" | "--data" => data = args.next().map(PathBuf::from),
             "-h" | "--help" => {
-                println!("usage: c8h18-edit [--data <game data folder>] [<file to open>]");
-                println!("       c8h18-edit mcp [--data <game data folder>] [--allow <folder>]... [<level to open>]");
+                println!("usage: c8h18-edit [--asset <dir|file.c8pak>] [<file to open>]");
+                println!("         the asset package: a game data folder or a .c8pak bundle of one (`--data` also works)");
+                println!("       c8h18-edit --pack <dir> <out.c8pak>");
+                println!("         zip a package folder into a bundle (leaves out save/ and hidden files)");
+                println!("       c8h18-edit --unpack <in.c8pak> <dir>");
+                println!("         unpack a bundle into a folder");
+                println!("       c8h18-edit mcp [--asset <package>] [--allow <folder>]... [<level to open>]");
                 println!("         MCP server on stdio, no window; levels are written only into the --allow folders");
                 println!("         (default: the current directory)");
-                println!("       c8h18-edit [--data <dir>] [--override <dir>] [--table <0..5>] --export-model <model.dat> <out.glb|out.obj>");
+                println!("       c8h18-edit [--asset <package>] [--override <dir>] [--table <0..5>] --export-model <model.dat> <out.glb|out.obj>");
                 println!("         export a model for Blender (.obj also writes .mtl and _tex.png next to it)");
-                println!("       c8h18-edit [--data <dir>] [--override <dir>] [--like <original.dat>] --import-model <in.glb|in.obj> <out.dat>");
+                println!("       c8h18-edit [--asset <package>] [--override <dir>] [--like <original.dat>] --import-model <in.glb|in.obj> <out.dat>");
                 println!("         convert a .glb/.gltf/.obj back to the game's model format");
                 println!("       c8h18-edit --midi-to-xmi <in.mid> <out.xmi> [--no-loop]");
                 println!("         convert a Standard MIDI file to XMIDI (loop from loopStart/loopEnd markers, else the whole piece)");
@@ -109,7 +138,7 @@ fn run_model_cli(args: Vec<String>) -> Result<String, String> {
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--data" => data = it.next().map(PathBuf::from),
+            "--asset" | "--data" => data = it.next().map(PathBuf::from),
             "--override" => over = Some(it.next().map(PathBuf::from).ok_or("--override takes a folder")?),
             "--like" => like = it.next().map(PathBuf::from),
             "--table" => table = it.next().and_then(|v| v.parse().ok()).filter(|&t| t < 6).ok_or("--table takes 0..5")?,
@@ -122,7 +151,7 @@ fn run_model_cli(args: Vec<String>) -> Result<String, String> {
     }
     let data = data.unwrap_or_else(|| PathBuf::from("resources"));
     if !resources::is_data_dir(&data) {
-        return Err(format!("{}: not a game data folder (give --data <dir>; the palette and model textures are needed)", data.display()));
+        return Err(format!("{}: not an asset package (give --asset <dir|file.c8pak>; the palette and model textures are needed)", data.display()));
     }
     // files in the override folder (same layout) win, e.g. a new OBJECTS/DATA/TEX0-0 atlas
     c8_data::files::set_override_dir(over);
@@ -159,14 +188,14 @@ fn run_mcp(args: Vec<String>) -> eframe::Result {
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--data" => data = it.next().map(PathBuf::from),
+            "--asset" | "--data" => data = it.next().map(PathBuf::from),
             "--allow" => allow.extend(it.next().map(PathBuf::from)),
             _ => open = Some(PathBuf::from(a)),
         }
     }
     let data = data.or_else(|| Some(PathBuf::from("resources"))).filter(|d| resources::is_data_dir(d));
     if data.is_none() {
-        eprintln!("c8h18-edit mcp: no game data folder (give --data <dir>)");
+        eprintln!("c8h18-edit mcp: no asset package (give --asset <dir|file.c8pak>)");
         std::process::exit(2);
     }
     let mut ws = mcp::headless::Headless::new(data, allow);

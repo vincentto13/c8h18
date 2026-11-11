@@ -186,7 +186,8 @@ pub(super) enum AiState {
 
 /// Parse the `--sim` output: craft lines every 100 ticks.
 fn parse_sim(out: &str) -> AiReport {
-    let summary = out.lines().next().unwrap_or("").to_string();
+    // the first line that is not a missing-asset warning
+    let summary = out.lines().find(|l| !l.starts_with("warning: ")).unwrap_or("").to_string();
     let mut tick = 0u32;
     let mut laps: Vec<(String, u32)> = Vec::new();
     // per craft: last sampled position and how many samples it has not moved
@@ -245,6 +246,7 @@ impl LevelDoc {
                 let data = data.canonicalize().unwrap_or(data);
                 let exe = crate::launch::game_exe();
                 let out = std::process::Command::new(&exe)
+                    .arg("--asset")
                     .arg(&data)
                     .arg("--override")
                     .arg(&dir)
@@ -377,6 +379,18 @@ mod tests {
             let errors: Vec<String> = check(&l).into_iter().filter(|i| i.error).map(|i| i.text).collect();
             assert!(errors.is_empty(), "level {t}: {errors:?}");
         }
+    }
+
+    /// The new track 1 in assets/custom (written by the local mapgen generator) round-trips and has
+    /// no problems at all.
+    #[test]
+    fn generated_track_is_clean() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/custom/MAPS/LEVEL0-1.DAT");
+        let Ok(raw) = std::fs::read(&p) else { return };
+        let l = Level::from_bytes(&raw).expect("parse");
+        assert!(l.to_bytes().expect("write") == raw, "assets/custom level differs after a round trip");
+        let issues: Vec<String> = check(&l).into_iter().map(|i| format!("{}: {}", if i.error { "error" } else { "warning" }, i.text)).collect();
+        assert!(issues.is_empty(), "{issues:?}");
     }
 
     #[test]

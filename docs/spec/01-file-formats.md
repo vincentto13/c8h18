@@ -685,7 +685,17 @@ first) and completes the header.
 
 ## 16. Port deviations
 
-- The port reads `save/config.dat`, `save/save%02d.dat` and writes `flics/game%04d.flc` under the data directory.
+- The port reads its files from an asset package: a folder in the original layout or a `.c8pak` bundle (a zip with
+  the same layout at its root), names matched in any letter case. It reads and writes `save/config.dat`,
+  `save/save%02d.dat` (and its own `keys.txt`, `pad.txt`, `video.txt`) under the package folder; for a bundle, which
+  is never written, in a per-user folder (`~/Library/Application Support/c8h18/<bundle name>/save/` on macOS),
+  or in `$C8H18_SAVE_DIR` when that is set. Screen recordings (`flics/game%04d.flc`) are not written.
+- Port addition, partial packages: a missing or unusable file prints one warning on stdout
+  (`warning: missing asset DATA/SKY0-0.DAT: drawing a plain sky`) and is replaced: a built-in palette, empty fonts and
+  sprite sheets, plain backdrops, generated search rings (§10), placeholder terrain textures, a gradient sky, colour
+  tables computed from the palette (§5: rows 0..31 fade towards the haze, row 32 the identity, rows 33..63 darken,
+  nearest palette colours; the blend table; flat colours averaged from the textures). Without `PUZZLE.DAT` the
+  sliding puzzle is disabled, without `TMAPS` no billboards are drawn.
 - The port's fresh config (when no file exists) follows the original's defaults except: the stereo flag is set (the
   original's fresh config is mono), the track records start at 0 instead of 9999 / "C8H18" (the port treats 0 as
   "no record"), and the second score table is left zero.

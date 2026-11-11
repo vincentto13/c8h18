@@ -12,6 +12,42 @@ impl Palette {
         let d = read_raw("data/palet0-0.dat")?;
         Ok(Self::from_bytes(&d))
     }
+    /// Port addition: a built-in neutral palette for packages without `DATA/PALET0-0.DAT`:
+    /// colour 0 black, 1..31 a grey ramp, then 14 hue ramps of 16 shades (dark to light, the
+    /// lightest ones paler); colour 255 is white.
+    pub fn builtin() -> Palette {
+        let mut vga = [[0u8; 3]; 256];
+        for (i, c) in vga.iter_mut().enumerate().take(32) {
+            *c = [(i * 63 / 31) as u8; 3];
+        }
+        for r in 0..14 {
+            let hue = r as f32 * 360.0 / 14.0;
+            for s in 0..16 {
+                let v = (s + 1) as f32 / 16.0;
+                let sat = if s < 10 { 0.65 } else { 0.65 - (s - 9) as f32 * 0.08 };
+                let (h6, f) = ((hue / 60.0).floor(), hue / 60.0 - (hue / 60.0).floor());
+                let (p, q, t) = (v * (1.0 - sat), v * (1.0 - sat * f), v * (1.0 - sat * (1.0 - f)));
+                let rgb = match h6 as i32 % 6 {
+                    0 => [v, t, p],
+                    1 => [q, v, p],
+                    2 => [p, v, t],
+                    3 => [p, q, v],
+                    4 => [t, p, v],
+                    _ => [v, p, q],
+                };
+                vga[32 + r * 16 + s] = rgb.map(|x| (x * 63.0).round().clamp(0.0, 63.0) as u8);
+            }
+        }
+        vga[255] = [63, 63, 63];
+        Palette { vga }
+    }
+    /// `DATA/PALET0-0.DAT`, or the [built-in palette](Self::builtin) after a warning.
+    pub fn load_or_builtin() -> Palette {
+        match crate::files::read_or_warn("data/palet0-0.dat", "using a built-in neutral palette") {
+            Some(d) => Self::from_bytes(&d),
+            None => Self::builtin(),
+        }
+    }
     pub fn from_bytes(d: &[u8]) -> Palette {
         let mut vga = [[0u8; 3]; 256];
         for i in 0..256 {
@@ -214,6 +250,53 @@ pub fn load_sky(n: usize) -> Result<Vec<u8>, String> {
     Ok(d)
 }
 
+/// Haze colour (8-bit RGB) of the colour tables computed for tracks without `TABLE0-N`, and the
+/// horizon colour of the [`gradient_sky`] drawn for tracks without `SKY0-N`.
+pub const FALLBACK_HAZE: [u8; 3] = [170, 180, 195];
+/// Zenith colour of the fallback sky.
+pub const FALLBACK_SKY_TOP: [u8; 3] = [60, 90, 150];
+
+/// Port addition: placeholder terrain textures (a TEXTU file's 256 textures of 64 × 64) for
+/// tracks without `TEXTU0-N`: each a grey tile with a darker grid every 16 pixels and a border,
+/// its brightness varying mildly with the texture id so neighbouring kinds stay apart.
+pub fn placeholder_textures(pal: &Palette) -> Vec<u8> {
+    let mut near = Nearest::new(pal);
+    let mut out = vec![0u8; 1048576];
+    for t in 0..256usize {
+        let h = (t as u32).wrapping_mul(2654435761) >> 24;
+        let base = 26 + (h % 12) as i32;
+        let tint = [(h >> 4 & 1) as i32, 0, (h >> 5 & 1) as i32];
+        for y in 0..64usize {
+            for x in 0..64usize {
+                let edge = x == 0 || y == 0;
+                let grid = x % 16 == 0 || y % 16 == 0;
+                let noise = (((x * 7 + y * 13 + t * 5) ^ (x * y)) % 3) as i32 - 1;
+                let v = if edge { base - 10 } else if grid { base - 5 } else { base + noise };
+                out[t * 4096 + y * 64 + x] = near.get(std::array::from_fn(|k| v + tint[k]));
+            }
+        }
+    }
+    out
+}
+
+/// Port addition: a 256 × 256 sky for tracks without `SKY0-N`: a vertical gradient from `top`
+/// (row 0) to `horizon` (row 255, just above the horizon), both 8-bit RGB, ordered-dithered to
+/// the palette.
+pub fn gradient_sky(pal: &Palette, top: [u8; 3], horizon: [u8; 3]) -> Vec<u8> {
+    const BAYER: [[i32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+    let mut near = Nearest::new(pal);
+    let (a, b) = (crate::tables::rgb_to_vga(top), crate::tables::rgb_to_vga(horizon));
+    let mut out = vec![0u8; 65536];
+    for y in 0..256usize {
+        for x in 0..256usize {
+            let d = BAYER[y & 3][x & 3] - 8;
+            let c = std::array::from_fn(|k| (a[k] as i32 * 16 * (255 - y as i32) + b[k] as i32 * 16 * y as i32) / 255 + d);
+            out[y * 256 + x] = near.get(c.map(|v: i32| (v + 8).div_euclid(16)));
+        }
+    }
+    out
+}
+
 /// Model texture atlas TEX0-0 (spec 01 §7).
 pub struct TexAtlas {
     #[allow(dead_code)] // kept to describe the data; not needed by the game yet
@@ -236,11 +319,23 @@ impl TexAtlas {
         }
         Ok(TexAtlas { w: 256, h, pix, entries })
     }
+    /// Port addition: a 256 × 256 atlas of one mid grey with no entries, for packages without
+    /// TEX0-0 (textured triangles then sample its corner).
+    pub fn plain(pal: &Palette) -> TexAtlas {
+        TexAtlas { w: 256, h: 256, pix: vec![Nearest::new(pal).get([36, 36, 36]); 65536], entries: Vec::new() }
+    }
 }
 
 /// Search rings (spec 01 §10), as offsets from the centre in walk order; see [`crate::search`].
 pub fn load_search_rings() -> Result<Vec<Vec<(i32, i32)>>, String> {
     Ok(crate::search::Rings::build(&load("data/srch0-0.dat")?).offsets())
+}
+
+/// [`load_search_rings`], or the rings of a generated grid ([`crate::search::generate`]) after a
+/// warning.
+pub fn load_search_rings_or_generate() -> Vec<Vec<(i32, i32)>> {
+    let grid = crate::files::load_or_warn("data/srch0-0.dat", "using generated search rings").unwrap_or_else(crate::search::generate);
+    crate::search::Rings::build(&grid).offsets()
 }
 
 #[cfg(test)]
@@ -250,6 +345,29 @@ mod tests {
     fn original(rel: &str) -> Option<Vec<u8>> {
         let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources").join(rel);
         crate::rnc::maybe_unpack(std::fs::read(p).ok()?).ok()
+    }
+
+    #[test]
+    fn fallbacks() {
+        let pal = Palette::builtin();
+        // distinct enough: black, white and a grey ramp
+        assert_eq!(pal.vga[0], [0, 0, 0]);
+        assert_eq!(pal.vga[255], [63, 63, 63]);
+        let distinct: std::collections::HashSet<[u8; 3]> = pal.vga.iter().copied().collect();
+        assert!(distinct.len() > 200, "{}", distinct.len());
+        let tex = placeholder_textures(&pal);
+        assert_eq!(tex.len(), 1 << 20);
+        // textures differ from each other and are greyish
+        assert_ne!(tex[..4096], tex[4096..8192]);
+        for &p in &tex[..4096] {
+            let c = pal.vga[p as usize];
+            assert!(c.iter().max().unwrap() - c.iter().min().unwrap() <= 8, "{c:?}");
+        }
+        let sky = gradient_sky(&pal, FALLBACK_SKY_TOP, FALLBACK_HAZE);
+        assert_eq!(sky.len(), 65536);
+        let lum = |row: usize| sky[row * 256..row * 256 + 256].iter().map(|&p| pal.vga[p as usize].iter().map(|&v| v as u32).sum::<u32>()).sum::<u32>();
+        assert!(lum(250) > lum(5), "brighter towards the horizon");
+        assert!(!load_search_rings_or_generate().is_empty());
     }
 
     #[test]

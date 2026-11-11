@@ -51,16 +51,17 @@ fn parse(text: &str, file: &str) -> Result<Lang, String> {
     Ok(l)
 }
 
-/// Load every language file. English is required; a missing other language falls back to English.
+/// Load every language file. A missing or broken language falls back to English (after a
+/// warning); without English the texts are empty. Always `Ok` (kept for the callers).
 pub fn load() -> Result<(), String> {
     let mut langs = Vec::new();
     for code in CODES {
         let rel = format!("lang/{code}.txt");
-        let lang = match super::files::read_raw(&rel) {
-            Ok(d) => parse(&String::from_utf8_lossy(&d), &rel)?,
-            Err(e) if code == "en" => return Err(e),
-            Err(_) => {
-                log::warn!("{rel} not found, using English");
+        let fallback = if code == "en" { "texts are left empty" } else { "using English" };
+        let lang = match super::files::read_raw(&rel).and_then(|d| parse(&String::from_utf8_lossy(&d), &rel)) {
+            Ok(l) => l,
+            Err(e) => {
+                super::files::warn_asset(&rel, Some(&e), fallback);
                 Lang::default()
             }
         };

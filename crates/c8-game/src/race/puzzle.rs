@@ -110,7 +110,7 @@ pub fn step(cfg: &mut Config, keys: &[KeyCode]) {
 }
 
 pub fn draw(cfg: &Config, a: &Assets, fg: &mut Canvas) {
-    let img = &a.puzzle;
+    let Some(img) = &a.puzzle else { return };
     for r in 0..4 {
         for c in 0..4 {
             let t = cell(cfg, c, r);

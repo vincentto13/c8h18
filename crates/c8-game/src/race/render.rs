@@ -103,7 +103,7 @@ impl<'a> SceneBuilder<'a> {
 
     fn shadow(&mut self, pos: [f32; 3]) {
         let Some((tm, h, blend)) = sprite_def(178) else { return };
-        let img = &self.assets.tmaps[tm];
+        let (Some(img), Some(&(u0, v0))) = (self.assets.tmaps.get(tm), self.tmap_pos.get(tm)) else { return };
         let ground = pos[2];
         let _ = ground;
         let hh = h / 2048.0;
@@ -112,7 +112,6 @@ impl<'a> SceneBuilder<'a> {
         let right = [cy, 0.0, sy];
         let fwd = [sy, 0.0, -cy];
         let c = Self::gp(pos);
-        let (u0, v0) = self.tmap_pos[tm];
         let (u1, v1) = (u0 as f32 + img.w as f32, v0 as f32 + img.h as f32);
         let corner = |a: f32, b: f32| [c[0] + right[0] * a + fwd[0] * b, c[1] + 0.02, c[2] + right[2] * a + fwd[2] * b];
         let p = [corner(-ww / 2.0, hh / 2.0), corner(ww / 2.0, hh / 2.0), corner(ww / 2.0, -hh / 2.0), corner(-ww / 2.0, -hh / 2.0)];
@@ -151,7 +150,7 @@ impl<'a> SceneBuilder<'a> {
         let (r, u, _) = self.cam.basis();
         let corner = |a: f32, b: f32| [c[0] + r[0] * a + u[0] * b, c[1] + r[1] * a + u[1] * b, c[2] + r[2] * a + u[2] * b];
         let p = [corner(-ww / 2.0, hh), corner(ww / 2.0, hh), corner(ww / 2.0, 0.0), corner(-ww / 2.0, 0.0)];
-        let (u0, v0) = self.tmap_pos[tm];
+        let Some(&(u0, v0)) = self.tmap_pos.get(tm) else { return };
         let (u1, v1) = (u0 as f32 + img.w as f32, v0 as f32 + img.h as f32);
         let uv = [[u0 as f32, v0 as f32], [u1, v0 as f32], [u1, v1], [u0 as f32, v1]];
         self.push_bill(v[2] - 64.0 / 2048.0, p, uv, blend);

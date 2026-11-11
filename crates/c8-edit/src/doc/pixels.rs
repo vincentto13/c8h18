@@ -19,9 +19,9 @@ pub fn palette_rgb(p: &Palette) -> Rgb {
     p.vga.map(|c| c.map(vga8))
 }
 
-/// The game palette, or a grey ramp if the data folder has none.
+/// The game palette, or the built-in one (after a warning) if the package has none.
 pub fn game_palette() -> Rgb {
-    Palette::load().map(|p| palette_rgb(&p)).unwrap_or_else(|_| std::array::from_fn(|i| [i as u8; 3]))
+    palette_rgb(&Palette::load_or_builtin())
 }
 
 /// Display colours of the mask fonts (OLFNT/OSFNT): 0 = outline, anything else = text (the game

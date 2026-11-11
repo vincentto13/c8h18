@@ -45,6 +45,26 @@ pub fn load_level(t: usize) -> Result<Level, String> {
     }
 }
 
+/// The colour table, terrain textures and sky of track set `set` (0-based). Missing or unusable
+/// files are replaced after a warning (port addition): placeholder textures, a gradient sky and
+/// a colour table computed from the palette (flat colours from the textures).
+pub fn track_look(set: usize, pal: &crate::data::images::Palette) -> (ColourTable, Vec<u8>, Vec<u8>) {
+    use crate::data::{files, images};
+    let textures = load_terrain_textures(set).unwrap_or_else(|e| {
+        files::warn_asset(&format!("data/textu0-{set}.dat"), Some(&e), "using generated placeholder textures");
+        images::placeholder_textures(pal)
+    });
+    let sky = load_sky(set).unwrap_or_else(|e| {
+        files::warn_asset(&format!("data/sky0-{set}.dat"), Some(&e), "drawing a plain sky");
+        images::gradient_sky(pal, images::FALLBACK_SKY_TOP, images::FALLBACK_HAZE)
+    });
+    let table = ColourTable::load(set).unwrap_or_else(|e| {
+        files::warn_asset(&format!("data/table0-{set}.dat"), Some(&e), "computing the colour table from the palette");
+        ColourTable::from_bytes(&crate::data::tables::build_with_textures(pal, images::FALLBACK_HAZE, Some(&textures)))
+    });
+    (table, textures, sky)
+}
+
 /// Length of one simulation tick in real seconds. The simulation always advances in whole
 /// fixed ticks (independent of the frame rate); drawing interpolates between them.
 pub fn tick_secs() -> f64 {
@@ -84,10 +104,11 @@ impl Race {
     pub fn new(setup: RaceSetup, ctx: &mut Ctx, gfx: &mut Gfx) -> Result<Race, String> {
         let t = setup.track.clamp(1, 6);
         let lvl = load_level(t)?;
-        let table = Rc::new(ColourTable::load(t - 1)?);
+        let (table, textures, sky) = track_look(t - 1, &ctx.assets.palette);
+        let table = Rc::new(table);
         gfx.set_colour_table(&table.data);
-        gfx.set_terrain_textures(&load_terrain_textures(t - 1)?);
-        gfx.set_sky(&load_sky(t - 1)?);
+        gfx.set_terrain_textures(&textures);
+        gfx.set_sky(&sky);
         gfx.set_palette(&ctx.assets.palette.vga);
         let mut w = World::new(lvl, ctx.assets.rings.clone());
         w.demo = setup.demo;
@@ -220,13 +241,13 @@ impl Race {
         }
         // keys
         let mut keys = std::mem::take(&mut ctx.keys);
-        if !self.setup.demo {
-            if let Some(i) = keys.iter().position(|k| k.code == KeyCode::Tab && k.ctrl) {
-                keys.remove(i);
-                puzzle::toggle(ctx.cfg);
-            }
+        // without its picture (DATA/PUZZLE.DAT) the puzzle is disabled
+        let puzzle_ok = !self.setup.demo && ctx.assets.puzzle.is_some();
+        if puzzle_ok && let Some(i) = keys.iter().position(|k| k.code == KeyCode::Tab && k.ctrl) {
+            keys.remove(i);
+            puzzle::toggle(ctx.cfg);
         }
-        let puzzle_on = !self.setup.demo && puzzle::visible(ctx.cfg);
+        let puzzle_on = puzzle_ok && puzzle::visible(ctx.cfg);
         if puzzle_on {
             for k in keys.drain(..) {
                 if matches!(k.code, KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::ArrowLeft | KeyCode::ArrowRight) {
@@ -731,7 +752,7 @@ impl Race {
                 Hud::finishers(fg, a, w);
             }
         }
-        if !self.setup.demo && puzzle::visible(ctx.cfg) {
+        if !self.setup.demo && a.puzzle.is_some() && puzzle::visible(ctx.cfg) {
             puzzle::draw(ctx.cfg, a, fg);
         }
         if let Some(pm) = &mut self.paused {

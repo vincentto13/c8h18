@@ -4,6 +4,8 @@
 //! (levels first), so that anything the editor saves loads in the game.
 pub mod rnc;
 pub mod files;
+pub mod package;
+pub mod tables;
 pub mod sprites;
 pub mod images;
 pub mod model;

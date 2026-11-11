@@ -328,13 +328,13 @@ mod tests {
         assert_eq!(n, 62);
     }
 
-    /// The replacement models and atlas in `assets/models` (made by the local modelgen tool): all 62
+    /// The replacement models and atlas in `assets/custom` (made by the local modelgen tool; TRACK0-0 by mapgen): all 62
     /// model files are there (crafts, props, recovery truck, track previews), every one passes
     /// `check`, round-trips byte-exact and keeps its UVs inside its atlas entries. A model missing
     /// from the folder would fall back to the original, so it must fit the new atlas too.
     #[test]
     fn generated_models_are_valid() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/models/OBJECTS/DATA");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/custom/OBJECTS/DATA");
         let Ok(tab) = std::fs::read(dir.join("TEX0-0.TAB")) else { return };
         let entries: Vec<(u32, u32)> = tab.chunks(6).map(|e| (e[4] as u32, e[5] as u32)).collect();
         assert_eq!(entries.len(), ATLAS_ENTRIES);
@@ -359,7 +359,7 @@ mod tests {
             fits(&m, &name);
             n += 1;
         }
-        assert_eq!(n, model_files().len(), "models in assets/models");
+        assert_eq!(n, model_files().len(), "models in assets/custom");
     }
 
     #[test]

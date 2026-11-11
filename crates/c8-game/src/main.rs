@@ -349,20 +349,15 @@ impl ApplicationHandler for App {
         let mut gfx = pollster::block_on(Gfx::new(window.clone()));
         pad::load_settings();
         video::load();
-        let assets = match data::strings::load().and_then(|_| Assets::load()) {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!("failed to load data: {e}");
-                el.exit();
-                return;
-            }
-        };
+        let _ = data::strings::load();
+        let assets = Assets::load();
         gfx.set_palette(&assets.palette.vga);
         gfx.set_colour_table(&assets.fe_table.data);
         gfx.set_model_atlas(&assets.atlas.pix, assets.atlas.h);
         gfx.set_tmaps(&assets.tmaps);
         let cfg = Config::load();
-        log::info!("tracks available: {:?}", tracks::available().iter().map(|t| t + 1).collect::<Vec<_>>());
+        let avail = tracks::available();
+        log::info!("tracks available: {:?}", avail.iter().map(|t| t + 1).collect::<Vec<_>>());
         let mut audio = Audio::new(self.opts.sound);
         audio.set_stereo(cfg.stereo());
         audio.set_effects_volume(cfg.effects_volume());
@@ -381,7 +376,7 @@ impl ApplicationHandler for App {
             match intro::Intro::new() {
                 Ok(i) => Mode::Intro(i),
                 Err(e) => {
-                    log::info!("intro skipped: {e}");
+                    data::files::warn_asset("data/intro.dat", Some(&e), "skipping the intro movie");
                     audio.load_bank(0);
                     Mode::Title(0.0)
                 }
@@ -478,6 +473,8 @@ fn main() {
     env_logger::init();
     let mut opts = Opts { sound: true, intro: true, race: None };
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut asset: Option<std::path::PathBuf> = None;
+    let mut sim = None;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
@@ -494,9 +491,8 @@ fn main() {
         } else if l == "--sim" {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             let n = args.get(i + 2).and_then(|v| v.parse().ok()).unwrap_or(1000u32);
-            let rings = data::images::load_search_rings().unwrap();
-            race::headless(t, n, rings, true);
-            return;
+            sim = Some((t, n));
+            i += 2;
         } else if l == "--level" {
             if let Some(p) = args.get(i + 1) {
                 let _ = race::LEVEL_FILE.set(p.into());
@@ -510,6 +506,7 @@ fn main() {
             }
             i += 1;
         } else if l == "--override" {
+            // editor-internal ("Test in game"): a folder whose files win over the package's
             if let Some(p) = args.get(i + 1) {
                 data::files::set_override_dir(Some(p.into()));
             }
@@ -518,18 +515,37 @@ fn main() {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             opts.race = Some((t, l == "--demo"));
             i += 1;
-        } else if l == "--data" {
+        } else if l == "--asset" || l == "--data" {
+            // `--data` is the old name of `--asset`
             if let Some(p) = args.get(i + 1) {
-                data::files::set_data_dir(p.into());
+                asset = Some(p.into());
             }
             i += 1;
+        } else if l == "-h" || l == "--help" {
+            println!("usage: c8h18 [--asset <dir|file.c8pak>] [-s|--silent] [--no-intro] [--lang <code>] [--speed <25..400>]");
+            println!("                [--race <1..6> | --demo <1..6>] [--level <file>] [--sim <track> <ticks>]");
+            println!("  --asset   the asset package: a directory with the original layout (DATA/, MAPS/, OBJECTS/, SOUND/,");
+            println!("            lang/) or a .c8pak bundle of one (default: resources); also `--data <path>`, a bare");
+            println!("            <path> or the GAME_DATA environment variable");
+            return;
         } else if !l.starts_with('-') {
-            data::files::set_data_dir(a.into());
+            asset = Some(a.into());
         }
         i += 1;
     }
     if let Ok(d) = std::env::var("GAME_DATA") {
-        data::files::set_data_dir(d.into());
+        asset = Some(d.into());
+    }
+    if let Some(p) = asset
+        && let Err(e) = data::files::set_asset(&p)
+    {
+        println!("warning: {e}: no assets can be loaded");
+        data::files::set_data_dir(p);
+    }
+    if let Some((t, n)) = sim {
+        let rings = data::images::load_search_rings_or_generate();
+        race::headless(t, n, rings, true);
+        return;
     }
     let el = EventLoop::new().expect("event loop");
     el.set_control_flow(ControlFlow::Poll);

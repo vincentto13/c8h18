@@ -34,6 +34,16 @@ impl SpriteSheet {
         let tab = read_raw(&format!("data/{name}.tab"))?;
         Ok(Self::decode(&dat, &tab))
     }
+    /// [`load`](Self::load), or an empty sheet (drawn as nothing) after a warning naming the
+    /// missing file and `fallback`.
+    pub fn load_or_warn(name: &str, fallback: &str) -> SpriteSheet {
+        Self::load(name).unwrap_or_else(|e| {
+            let dat = format!("data/{name}.dat");
+            let rel = if crate::files::exists(&dat) && !crate::files::exists(&format!("data/{name}.tab")) { format!("data/{name}.tab") } else { dat };
+            crate::files::warn_asset(&rel, Some(&e), fallback);
+            SpriteSheet::default()
+        })
+    }
     pub fn decode(dat: &[u8], tab: &[u8]) -> SpriteSheet {
         let n = tab.len() / 6;
         let mut sprites = Vec::with_capacity(n);

@@ -65,7 +65,7 @@ impl TableDoc {
         data.truncate(SIZE);
         let stem = path.file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
         let set = stem.rsplit_once("0-").and_then(|(_, n)| n.parse().ok()).unwrap_or(0usize).min(5);
-        let pal = Palette::load().unwrap_or_else(|_| Palette { vga: std::array::from_fn(|i| [(i / 4) as u8; 3]) });
+        let pal = Palette::load_or_builtin();
         let haze = ColourTable::from_bytes(&data).haze(&pal);
         let textures = c8_data::images::load_terrain_textures(set).ok();
         Ok(TableDoc { path, rel, set, data, history: History::default(), rgb: palette_rgb(&pal), pal, textures, view: View::Light, haze, sample_tex: 1, image: None, lit: None, generation: 0, message: String::new(), test: false })

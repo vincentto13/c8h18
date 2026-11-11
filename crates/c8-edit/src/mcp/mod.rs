@@ -133,7 +133,7 @@ pub fn call(ws: &mut dyn Workspace, name: &str, args: &Value) -> Out {
                     if !(1..=6).contains(&t) {
                         return Err("track is 1..6".into());
                     }
-                    c8_data::files::resolve(&format!("maps/level0-{t}.dat")).ok_or(format!("track {t} not found in the data folder"))?
+                    crate::resources::local_file(&format!("maps/level0-{t}.dat")).ok_or(format!("track {t} not found in the asset package"))?
                 }
                 (None, Some(p)) => {
                     let p = PathBuf::from(p);

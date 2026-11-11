@@ -1,4 +1,6 @@
-//! The game data folder as a list of resources, grouped by kind.
+//! The asset package (a game data folder or a `.c8pak` bundle) as a list of resources,
+//! grouped by kind. A bundle's files are unpacked into a temporary mirror folder, which the
+//! documents open and save like those of a folder.
 use std::path::{Path, PathBuf};
 
 /// Resource kinds of the game's data files (spec 01). Each kind gets its own document type; the
@@ -53,7 +55,7 @@ impl Kind {
         if dir == "objects" {
             return if name.starts_with("tex") { Kind::ModelTextures } else { Kind::Model };
         }
-        // a bank outside the data folder (opened by its file name), e.g. assets/music/SOUND/MUSIC.DAT
+        // a bank outside the data folder (opened by its file name), e.g. assets/custom/SOUND/MUSIC.DAT
         if r == name && (name == "sound.dat" || name == "music.dat") {
             return Kind::Sound;
         }
@@ -115,15 +117,106 @@ pub fn scan(root: &Path) -> Vec<Entry> {
     out
 }
 
-/// Does this look like a game data folder?
+/// Does this look like an asset package (a directory or a `.c8pak` bundle with `MAPS/`,
+/// `DATA/` or `OBJECTS/` in the original layout)? Makes it the current package when it does.
+/// Packages may be partial: a missing palette and the like only print warnings later.
 pub fn is_data_dir(p: &Path) -> bool {
-    c8_data::files::set_data_dir(p.to_path_buf());
-    c8_data::files::resolve("data/palet0-0.dat").is_some() && c8_data::files::resolve("maps").is_some()
+    let Some(pkg) = probe(p) else { return false };
+    c8_data::files::set_package(pkg);
+    true
+}
+
+/// The package at `p` if it looks like one (see [`is_data_dir`]), without making it current.
+pub fn probe(p: &Path) -> Option<c8_data::package::Package> {
+    let pkg = c8_data::package::Package::open(p).ok()?;
+    ["maps", "data", "objects"].iter().any(|d| pkg.has_dir(d)).then_some(pkg)
+}
+
+/// The folder a bundle is unpacked into for the editor's documents (they open and save local
+/// files): `<temp>/c8h18-edit-bundles/<stem>-<hash of the bundle path>`.
+pub fn mirror_dir(bundle: &Path) -> PathBuf {
+    let abs = bundle.canonicalize().unwrap_or_else(|_| bundle.to_path_buf());
+    let hash = abs.to_string_lossy().bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let stem = bundle.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    std::env::temp_dir().join("c8h18-edit-bundles").join(format!("{stem}-{hash:016x}"))
+}
+
+const STAMP: &str = ".bundle-stamp";
+
+fn bundle_stamp(bundle: &Path) -> String {
+    let m = std::fs::metadata(bundle).ok();
+    let t = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("{} {t}", m.map(|m| m.len()).unwrap_or(0))
+}
+
+/// Unpack `bundle` into its [mirror](mirror_dir) unless the mirror already holds this version
+/// of it (same size and modification time). Returns the mirror folder.
+pub fn refresh_mirror(bundle: &Path) -> Result<PathBuf, String> {
+    let dir = mirror_dir(bundle);
+    let stamp = bundle_stamp(bundle);
+    if std::fs::read_to_string(dir.join(STAMP)).is_ok_and(|s| s == stamp) {
+        return Ok(dir);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    c8_data::package::unpack(bundle, &dir)?;
+    std::fs::write(dir.join(STAMP), stamp).map_err(|e| format!("{}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Write the mirror (with the documents saved into it) back over its bundle, atomically (a
+/// temporary file renamed over the bundle), and mark the mirror as up to date. Returns the
+/// number of files. The caller reopens the package (an open archive still reads the old file).
+pub fn repack_mirror(bundle: &Path) -> Result<usize, String> {
+    let dir = mirror_dir(bundle);
+    let n = c8_data::package::pack(&dir, bundle)?;
+    let _ = std::fs::write(dir.join(STAMP), bundle_stamp(bundle));
+    Ok(n)
+}
+
+/// The local file of `rel` in the current package: in a directory package the file itself, in a
+/// bundle its copy in the mirror.
+pub fn local_file(rel: &str) -> Option<PathBuf> {
+    let pkg = c8_data::files::package();
+    if pkg.is_bundle() {
+        let dir = refresh_mirror(pkg.path()).map_err(|e| log::warn!("{e}")).ok()?;
+        c8_data::files::resolve_in(dir, rel).filter(|p| p.is_file())
+    } else {
+        c8_data::files::resolve(rel)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundle_lists_and_opens_like_a_folder() {
+        let base = std::env::temp_dir().join(format!("c8-edit-bundle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("pkg");
+        for f in ["DATA/PALET0-0.DAT", "MAPS/LEVEL0-1.DAT", "DATA/PANEL0-1.DAT", "DATA/PANEL0-1.TAB"] {
+            std::fs::create_dir_all(src.join(f).parent().unwrap()).unwrap();
+            std::fs::write(src.join(f), f).unwrap();
+        }
+        let bundle = base.join("test.c8pak");
+        c8_data::package::pack(&src, &bundle).unwrap();
+        assert!(probe(&bundle).is_some_and(|p| p.is_bundle()));
+        assert!(probe(&base).is_none(), "not a package");
+        let mirror = refresh_mirror(&bundle).unwrap();
+        let names: Vec<String> = scan(&mirror).into_iter().map(|e| e.rel).collect();
+        let dir_names: Vec<String> = scan(&src).into_iter().map(|e| e.rel).collect();
+        assert_eq!(names, dir_names);
+        assert_eq!(std::fs::read(mirror.join("MAPS/LEVEL0-1.DAT")).unwrap(), b"MAPS/LEVEL0-1.DAT");
+        // save a changed file into the mirror and write the bundle back
+        std::fs::write(mirror.join("MAPS/LEVEL0-1.DAT"), b"changed").unwrap();
+        assert_eq!(repack_mirror(&bundle).unwrap(), 4);
+        assert_eq!(c8_data::package::Package::open(&bundle).unwrap().read("maps/level0-1.dat").unwrap(), b"changed");
+        assert_eq!(refresh_mirror(&bundle).unwrap(), mirror, "still up to date");
+        assert!(mirror.join("MAPS/LEVEL0-1.DAT").is_file());
+        let _ = std::fs::remove_dir_all(&mirror);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn classify() {

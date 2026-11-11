@@ -612,10 +612,14 @@ All from SOUND.DAT bank 0, played at the effects volume, centred:
 - DETAIL OPTIONS is never hidden (the port has no low-memory mode); NETWORK OPTIONS is always hidden (no network).
 - Choosing a SCREEN RESOLUTION item closes that submenu.
 - Track records of 0 count as "no record" (the port's fresh config starts the records at 0, see chapter 01).
-- Port addition, partial track sets: a track is **available** when its level `MAPS/LEVEL0-t.DAT` and its
-  `DATA/TEXTU0-(t-1).DAT`, `DATA/SKY0-(t-1).DAT` and `DATA/TABLE0-(t-1).DAT` are all found (override folder first,
-  then the data folder). Its preview model (model 50 + t − 1) and its minimap pictures are optional (missing models are
-  drawn as nothing). With all six tracks available everything below is the original behaviour. Otherwise:
+- Port addition, partial track sets: a track is **available** when its level `MAPS/LEVEL0-t.DAT` is found in the
+  asset package (a folder or a `.c8pak` bundle, any letter case). Its `DATA/TEXTU0-(t-1).DAT`, `DATA/SKY0-(t-1).DAT`
+  and `DATA/TABLE0-(t-1).DAT` are optional: when the race loads, a missing one prints a warning and is replaced by
+  placeholder textures (grey tiles with a grid), a vertical gradient sky (blue to the haze colour) or a colour table
+  computed from the palette (brightness rows fading to the haze, blend table, flat colours from the textures). Each
+  missing level prints `warning: missing asset MAPS/LEVEL0-t.DAT: track t is not available`. Its preview model
+  (model 50 + t − 1) and its minimap pictures are optional (missing models are drawn as nothing). With all six tracks
+  available everything below is the original behaviour. Otherwise:
   - The race number stays a track number (0..5) but always names an available track: any other value (fresh config,
     loaded slot, config from a full set) is replaced by the next available track after it, or else the first one.
   - Single race: the carousel holds only the available tracks, spaced 2048 / n apart (341 for six); with one track

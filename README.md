@@ -1,7 +1,8 @@
 # C8H18
 
 A recreation of the 1995 hover-craft combat racer from the specification in `docs/spec/`, running on the
-original data files in `resources/`.
+original data files in `resources/` or on our own assets made from scratch in `assets/custom/` (see
+[Asset packages](#asset-packages)).
 
 - Rendering: `wgpu` (Metal / Vulkan / DX12). Textures stay 8-bit palette indices and the shaders go
   through the per-track light table, so lighting and haze match the original. The 3D view uses the
@@ -28,7 +29,8 @@ A Cargo workspace with three crates:
 
 ```
 cargo build --release                # the game (the workspace's default member)
-./target/release/c8h18            # data directory defaults to ./resources
+./target/release/c8h18            # assets default to ./resources
+./target/release/c8h18 --asset assets/custom    # our own assets (partial: track 1, fallbacks for the rest)
 cargo build --release --workspace    # game and editor
 cargo test --workspace               # all tests
 ```
@@ -38,48 +40,89 @@ Options:
 | Option | Effect |
 |---|---|
 | `-s`, `/s`, `--silent` | no sound or music |
-| `--no-intro` | skip the intro movie (also skipped, silently, when `DATA/INTRO.DAT` is missing) |
+| `--no-intro` | skip the intro movie (also skipped, with a warning, when `DATA/INTRO.DAT` is missing) |
 | `--speed N` | game speed in percent of the original 20 ticks/s (default 90; e.g. 100 = original, 80 = slower) |
-| `<path>`, `--data <path>` or `GAME_DATA=<path>` | data directory (DATA/, MAPS/, OBJECTS/, SOUND/) |
+| `--asset <dir\|file.c8pak>` | the asset package: a folder in the original layout or a `.c8pak` bundle (see [Asset packages](#asset-packages)); default `resources`. `<path>`, `--data <path>` and `GAME_DATA=<path>` do the same |
 | `--race N` / `--demo N` | debug: go straight to a race / demo race on track N |
 | `--level <file>` | with `--race N` / `--demo N` / `--sim N`: race on this level file (e.g. saved by the editor) instead of track N's; textures, sky and music still come from track N |
 | `--sim N TICKS` | debug: run a headless computer-only race and print the crafts' progress |
-| `--override <dir>` | load data files from `<dir>` (same layout, e.g. `<dir>/DATA/TEXTU0-0.DAT`) in place of the data directory's; used by the editor's Test in game |
 | `--lang <code>` | use this language (`en`, `de`, `fr`, `es`, `it`, `pl`) instead of the saved one, without saving it |
 
-Saved files (`config.dat`, `save00.dat`..) go to `save/` inside the data directory.
+### Asset packages
+
+The game and the editor read their files from one **asset package**, given with `--asset`:
+
+- a **folder** with the original layout: `DATA/`, `MAPS/`, `OBJECTS/DATA/`, `SOUND/` (with
+  `SOUND/MUSIC/` for OGG tunes) and `lang/`, e.g. `resources/` (the original files) or
+  `assets/custom/` (our own);
+- or a **bundle**: a zip file with the extension `.c8pak` holding the same layout at its root
+  (deflate or stored; entries with absolute paths or `..` are ignored). Bundles are read in place,
+  each file decompressed when it is loaded.
+
+Names are matched in any letter case, so packages can be swapped freely. Build and unpack bundles
+with the editor:
+
+```
+c8h18-edit --pack assets/custom custom.c8pak     # leaves out save/ and hidden files
+c8h18-edit --unpack custom.c8pak some/folder
+./target/release/c8h18 --asset custom.c8pak
+```
+
+**Saves.** Config, save games, key, pad and video settings (`config.dat`, `save00.dat`..,
+`keys.txt`, `pad.txt`, `video.txt`) go to `save/` inside a folder package, as before. A bundle is
+never written: its saves go to a per-user folder named after the bundle file,
+`~/Library/Application Support/c8h18/<bundle name>/save/` on macOS
+(`%APPDATA%\c8h18\<bundle name>\save\` on Windows, `$XDG_DATA_HOME/c8h18/<bundle name>/save/`,
+default `~/.local/share/...`, elsewhere). `C8H18_SAVE_DIR=<dir>` puts them into `<dir>` instead,
+for any package (handy for test runs that must not touch the package or the user folder). Running
+`--asset assets/custom` writes `assets/custom/save/`, which `.gitignore` excludes (as it does
+`*.c8pak`); `--pack` leaves `save/` out.
 
 ### Partial data sets
 
-The game also runs from a data folder that holds only some of the original files, e.g. one made of
-our own assets only (port addition, spec 02 §17):
+A package may hold only some of the files, e.g. our own assets only (port addition, spec 02 §17).
+Every missing or unusable file prints one warning on stdout, once per run, and the game carries on
+without it:
 
-- **Intro.** Without `DATA/INTRO.DAT` the intro is skipped as with `--no-intro`; a truncated file
-  plays the frames it has, one with a bad header is skipped.
-- **Models.** A missing or unreadable model in `OBJECTS/DATA` is drawn as nothing.
-- **Tracks.** Only the tracks whose files are all found (in the `--override` folder or the data
-  folder) are offered: the track carousel shows just those, a championship is raced over those in
-  track order (one track is a championship of one race), and demo races use them. With all six
-  present nothing changes. Track N (1..6) needs:
+```
+warning: missing asset DATA/SKY0-0.DAT: drawing a plain sky
+```
 
-  | File | What |
-  |---|---|
-  | `MAPS/LEVEL0-N.DAT` | the level |
-  | `DATA/TEXTU0-(N-1).DAT` | terrain textures |
-  | `DATA/SKY0-(N-1).DAT` | sky |
-  | `DATA/TABLE0-(N-1).DAT` | colour (light) table |
+| Missing | Fallback (warning text after the file name) |
+|---|---|
+| `DATA/PALET0-0.DAT` | a built-in neutral palette (`using a built-in neutral palette`) |
+| fonts `HFONT0-0`, `MFONT0-0`, `OLFNT0-1`, `OSFNT0-1`, `PFONT0-1` (`.DAT`/`.TAB`) | that font's text is not drawn (`text in this font is not drawn`) |
+| `DATA/PANEL0-1` | no HUD, no menu box frames (`no HUD or panels`) |
+| `DATA/LOGO0-1` | no logo (`no logo`) |
+| `DATA/TRACK0-1` | no minimaps (`no track maps`) |
+| `DATA/OSCR0-1.DAT`, `ONET0-1.DAT`, `TITLE.DAT` | a plain dark background (`drawing a plain background`) |
+| `DATA/PUZZLE.DAT` | the sliding puzzle is disabled (`the sliding puzzle is disabled`) |
+| `DATA/TMAPS.DAT/.TAB` | no billboards (`no billboards`) |
+| `DATA/SRCH0-0.DAT` | search rings generated by the same rule as the editor's (`using generated search rings`) |
+| `DATA/TABLE0-N.DAT` | a colour table computed from the palette, flat colours from the track's textures (`computing the colour table from the palette`) |
+| `DATA/TEXTU0-N.DAT` | placeholder textures: grey tiles with a grid, a little lighter or darker per texture id (`using generated placeholder textures`) |
+| `DATA/SKY0-N.DAT` | a vertical gradient from blue to the haze colour (`drawing a plain sky`) |
+| `DATA/INTRO.DAT` | the intro is skipped, as with `--no-intro` (`skipping the intro movie`) |
+| `OBJECTS/DATA/<model>.DAT` | that model is drawn as nothing (`drawn as nothing`) |
+| `OBJECTS/DATA/TEX0-0.DAT/.TAB` | models get one plain grey texture (`models are drawn with a plain texture`) |
+| `SOUND/SOUND.DAT` | no sound effects (`sound effects are silent`) |
+| `SOUND/SAMPLE.OPL`, `SOUND/MUSIC.DAT` | no FM music; OGG tunes still play (`FM music is silent`) |
+| `lang/en.txt` / another `lang/*.txt` | empty texts / English (`texts are left empty` / `using English`) |
+| `MAPS/LEVEL0-N.DAT` | track N is not offered (`track N is not available`) |
 
-  Optional: `OBJECTS/DATA/TRACK0-(N-1).DAT` (its carousel model; nothing is drawn without it) and its
-  minimap pictures in the shared `DATA/TRACK0-1.DAT/.TAB` (entries 1–2, 3–5, 6, 7–8, 9–10, 11 for
-  tracks 1..6; nothing is drawn for missing entries). Track names, lap counts and the music tune
-  are still built in by track number. `DATA/TABLE0-0.DAT` is needed in any case (the menus use it),
-  but alone it does not make track 1 available. The game logs which tracks it found (`RUST_LOG=info`).
+A file that exists but cannot be read or decoded gets `warning: unusable asset NAME (error): ...`
+with the same fallback. A truncated `INTRO.DAT` plays the frames it has.
 
-  The other start-up files are always needed: `DATA/PALET0-0.DAT`, the fonts `HFONT0-0`, `MFONT0-0`,
-  `OLFNT0-1`, `OSFNT0-1`, `PFONT0-1` (`.DAT` + `.TAB`), the sprite sheets `PANEL0-1`, `LOGO0-1`,
-  `TRACK0-1` (`.DAT` + `.TAB`), `OSCR0-1.DAT`, `ONET0-1.DAT`, `TITLE.DAT`, `PUZZLE.DAT`, `TMAPS.DAT/.TAB`,
-  `SRCH0-0.DAT`, `TABLE0-0.DAT`, `OBJECTS/DATA/TEX0-0.DAT/.TAB` and `lang/*.txt`. Sound files
-  (`SOUND/SOUND.DAT`, `MUSIC.DAT`, `SAMPLE.OPL`) are optional: without them it is silent.
+**Tracks.** A track is offered when its level `MAPS/LEVEL0-N.DAT` is found; its textures, sky and
+colour table fall back as above. The track carousel shows just those tracks, a championship is
+raced over them in track order (one track is a championship of one race), and demo races use them.
+With all six present nothing changes. Optional: `OBJECTS/DATA/TRACK0-(N-1).DAT` (its carousel
+model) and its minimap pictures in the shared `DATA/TRACK0-1.DAT/.TAB` (entries 1–2, 3–5, 6, 7–8,
+9–10, 11 for tracks 1..6; nothing is drawn for missing entries). Track names, lap counts and the
+music tune are built in by track number. `assets/custom/` has `LEVEL0-1` only, so it offers track 1.
+
+The original DOS sound drivers in `SOUND/` (`*.DIG`, `*.MDI`, `*.INI`, `*.SBK`) are never
+read.
 
 ## Display options
 
@@ -160,11 +203,12 @@ entry needs the keyboard. Rumble is not supported (the controller library has no
 ## Editor
 
 ```
-cargo run --release -p c8-edit -- [--data <game data folder>] [<file>]
+cargo run --release -p c8-edit -- [--asset <dir|file.c8pak>] [<file>]
 ```
 
-`c8h18-edit` asks for the game data folder on the first start (or takes `--data`) and lists its
-files by kind. Levels open in a top-down map with switchable views (textures with lighting,
+`c8h18-edit` asks for the asset package on the first start (File > Game data folder… or Asset
+bundle…, or `--asset`; `--data` also works) and lists its files by kind; a bundle is listed like a
+folder. `<file>` may also be a path inside the package, e.g. `MAPS/LEVEL0-1.DAT`. Levels open in a top-down map with switchable views (textures with lighting,
 height, light), overlays (block columns, entities with walls, waypoint links and checkpoints,
 chargers and start area, grid) and a cell inspector. Tools (keys in brackets):
 
@@ -235,9 +279,15 @@ start cells, regenerate the circles (identical to the shipped grid except 16 han
 play the spread of either explosion. Only rings 0–5 are used by the game.
 
 Saving writes unpacked files (the game reads both; sheets also get their `.TAB`); originals in the
-data folder are never overwritten (Save asks for a new name). **Test in game** (button or ⌘R)
-writes the active file and every other open file with changes into a temporary override folder and
-starts `c8h18 --override <dir>` (the game next to the editor, or on the PATH): textures and
+package are never overwritten (Save asks for a new name, e.g. a file in another package folder).
+A bundle's files are unpacked into a temporary mirror folder (`<temp>/c8h18-edit-bundles/`) that
+the documents open; besides Save as, **File > Save into bundle** writes the active file into the
+mirror and repacks the mirror into a temporary file that is then renamed over the bundle, so the
+bundle is replaced in one step or not at all. **Test in game** (button or ⌘R)
+writes the active file and every other open file with changes into a temporary folder and starts
+`c8h18 --asset <package> --override <folder>` (the game next to the editor, or on the PATH; the
+package may be a bundle; `--override` is an internal option: files in that folder win over the
+package's): textures and
 skies on their track's race, levels on the race of the track set they are shown with, colour
 tables and race sounds on their track's race, tunes where they play, a language with `--lang`, the
 rest in the menus. The plan is in `docs/editor-plan.md`.
@@ -272,13 +322,13 @@ track-selection screen).
 Without a window:
 
 ```
-c8h18-edit [--data <dir>] [--table 0..5] --export-model OBJECTS/DATA/CAR0-0.DAT car.glb   # or car.obj
-c8h18-edit [--data <dir>] [--like OBJECTS/DATA/CAR0-0.DAT] --import-model car.glb CAR0-0.DAT
+c8h18-edit [--asset <package>] [--table 0..5] --export-model OBJECTS/DATA/CAR0-0.DAT car.glb   # or car.obj
+c8h18-edit [--asset <package>] [--like OBJECTS/DATA/CAR0-0.DAT] --import-model car.glb CAR0-0.DAT
 ```
 
-`--override <dir>` takes files from `<dir>` (same layout as the data folder) first, like the game's
-option: e.g. `--override assets/models` exports with the new texture atlas and maps imported UVs
-to its entries.
+The palette, colour table and texture atlas come from the package: e.g. `--asset assets/custom`
+exports with the new texture atlas and maps imported UVs to its entries. (Advanced:
+`--override <dir>` takes files from `<dir>` first.)
 
 `cargo test -p c8-edit blender -- --ignored` runs every shipped model through Blender (needs
 `blender` on the PATH): glTF (Blender's default import) and OBJ come back byte-identical. With
@@ -302,9 +352,9 @@ Every editing call is one undo step, labelled "MCP: …".
     a pause switch and the activity log.
   - The agent works on the open level tabs, and you see its edits as they happen. Cmd+Z undoes them.
   - The port and token are remembered; "New token" replaces the token.
-- **Headless.** `c8h18-edit mcp --data <game data> [--allow <folder>]... [level]` serves MCP over
+- **Headless.** `c8h18-edit mcp --asset <package> [--allow <folder>]... [level]` serves MCP over
   stdio without a window, e.g.
-  `claude mcp add c8h18-edit -- c8h18-edit mcp --data /path/to/game --allow /path/to/tracks`.
+  `claude mcp add c8h18-edit -- c8h18-edit mcp --asset /path/to/game --allow /path/to/tracks`.
   - Levels are read from the data folder and the allowed folders, and written only into the
     allowed folders (default: the current directory).
   - The game data folder is never written in either mode.
@@ -323,42 +373,48 @@ Tools:
 Resources: `docs://format` (units, layers, entity types, what a race needs), `level://summary`,
 `level://validation`. Prompts: `design-track`, `fix-validation`.
 
-## Fonts
+## Our own assets
 
-`assets/fonts/DATA` holds new font sheets (HFONT, MFONT, OLFNT, OSFNT, PFONT at both resolutions)
+`assets/custom/` is an asset package made from scratch, in the original layout, for
+`c8h18 --asset assets/custom` (or a bundle packed from it). What it lacks falls back as described
+in [Partial data sets](#partial-data-sets): at the time of writing the terrain textures, skies and
+colour tables of the tracks (`TEXTU0-*`, `SKY0-*`, `TABLE0-*`; a palette and `TABLE0-0` are being
+made), the screens (`LOGO0-*`, `OSCR0-*`, `ONET0-*`, `TITLE`, `PUZZLE`), the billboards (`TMAPS`),
+`SRCH0-0`, `INTRO` and tracks 2–6. `lang/` holds copies of the language files.
+
+### Fonts
+
+`assets/custom/DATA` holds new font sheets (HFONT, MFONT, OLFNT, OSFNT, PFONT at both resolutions)
 drawn from scratch: every entry keeps the original's width, height and ink box, so text lays out
-exactly as before, but the glyphs are new. Play with them with `c8h18 --override assets/fonts`.
+exactly as before, but the glyphs are new.
 
-## Models
+### Models
 
-`assets/models/OBJECTS/DATA` holds all 62 models made from scratch (48 crafts, recovery truck,
+`assets/custom/OBJECTS/DATA` holds all 62 models made from scratch (48 crafts, recovery truck,
 cones, barrels, marshal car, sign, and the six track previews of the carousel, built from the level
-files) and a new object texture sheet with the original's layout. Play with them with
-`c8h18 --override assets/models`. They are written by a local generator, `modelgen/` (not in
+files) and a new object texture sheet with the original's layout. They are written by a local generator, `modelgen/` (not in
 git; see its README, which also covers previews for custom levels).
 
-## Sound effects
+### Sound effects
 
-`assets/sound/SOUND/SOUND.DAT` holds new sound effects synthesised from scratch: both banks (the 35
+`assets/custom/SOUND/SOUND.DAT` holds new sound effects synthesised from scratch: both banks (the 35
 race and front-end entries, NULL placeholders kept, and the 14 intro sounds) in slot 0 (16-bit
-44.1 kHz) and in slots 3, 4 and 5 (8-bit 22 and 11 kHz, converted from the same sounds). Play with
-them with `c8h18 --override assets/sound`.
+44.1 kHz) and in slots 3, 4 and 5 (8-bit 22 and 11 kHz, converted from the same sounds).
 
 The game takes each SOUND.DAT bank from slot 0 (16-bit 44.1 kHz) when the file has it there and
 falls back to slot 3 (8-bit 22 kHz) otherwise, so the original file plays as before (spec 09 §9).
 The editor's sound panel shows every slot the file has; "Replace from WAV…" converts to the slot's
 format (16-bit 44.1 kHz in slot 0), in every slot of the bank at once with "Replace in all formats".
 
-## Music
+### Music
 
-`assets/music/SOUND` holds new music composed from scratch, as FM tunes like the original's:
+`assets/custom/SOUND` holds new music composed from scratch, as FM tunes like the original's:
 `MUSIC.DAT` (the five tunes in the FM slot) and `SAMPLE.OPL` / `SAMPLE.AD` (our own two-operator
-timbre bank, with a timbre for every General MIDI program and a percussion bank). Play with them
-with `c8h18 --override assets/music`. The tunes are written by a local generator, `musicgen/`
+timbre bank, with a timbre for every General MIDI program and a percussion bank). The tunes are written by a local generator, `musicgen/`
 (not in git; see its README).
 
 **OGG replacements.** Any tune can be replaced by a recording: put an OGG Vorbis file named after
-the tune in `SOUND/MUSIC/` of the data folder or of an `--override` folder:
+the tune in `SOUND/MUSIC/` of the asset package (folder or bundle):
 
 | Tune | Plays | File |
 |---|---|---|
@@ -380,7 +436,7 @@ ffmpeg -i tune.wav -c:a libvorbis -q:a 6 -metadata LOOPSTART=551250 -metadata LO
 (an ffmpeg without libvorbis has its own encoder: `-c:a vorbis -strict -2`). In the editor, open
 `SOUND/MUSIC.DAT`, select a tune and use "Use OGG…": the file is written to `MUSIC/<name>.OGG` beside
 the MUSIC.DAT when you save it (the game data folder itself is never written: saving there asks for
-another place, e.g. `assets/music/SOUND/MUSIC.DAT`), and "Test in game" takes it along. The panel
+another place, e.g. `assets/custom/SOUND/MUSIC.DAT`), and "Test in game" takes it along. The panel
 shows the loop over the waveform, edits it in samples ("Play loop seam" plays the last 3 s before
 the jump), and "Remove OGG" goes back to XMIDI. "Export as WAV…" writes the OGG decoded, or the
 XMIDI rendered on the OPL3 (48 kHz, up to the loop end of a second pass so the loop is seamless)
@@ -395,6 +451,23 @@ the command line:
 c8h18-edit --midi-to-xmi tune.mid TGAME1.XMI [--no-loop]   # note-offs → durations, ticks → 1/120 s, loop → FOR/NEXT
 c8h18-edit --xmi-to-midi TGAME1.XMI tune.mid               # for MuseScore, LMMS or a DAW
 ```
+
+### Maps
+
+`assets/custom` holds a new track 1 made from scratch (`MAPS/LEVEL0-1.DAT`): a clockwise canyon
+circuit with a start grid, a banked sweeper, a crest, a chicane, a dip, a hairpin and a pit straight,
+with checkpoints, computer-driver waypoints, charger pads, collectables and props. It passes the
+editor's checks and the computer drivers complete laps. The package also holds its minimaps
+(`DATA/TRACK0-0/1`) and its carousel model (`OBJECTS/DATA/TRACK0-0.DAT`). Until our own terrain
+textures, sky and colour table exist it races with the fallbacks. It is written by a local generator, `mapgen/` (not
+in git; see its README).
+
+### HUD and icons
+
+`assets/custom/DATA` holds the HUD (`PANEL0-0/1`), the icon sheets (`HSPR0-0`, `MSPR0-0`) and the
+pointer (`POINT0-0`) drawn from scratch: every entry keeps the original's size and ink box (the
+gauge pieces also their outlines, so they still join up), the drawings are new. The port only uses `PANEL0-1`. They are written by a local
+generator, `spritegen/` (not in git; see its README).
 
 ## Debug automation
 

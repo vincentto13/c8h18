@@ -119,9 +119,9 @@ The editor contains an MCP server built on `rmcp`, the official Rust MCP SDK. It
    - every MCP call becomes a normal Command on the UI thread, sent through a channel;
    - edits show up immediately and can be undone;
    - a lock icon pauses agent access.
-2. **Headless.** `c8h18-edit mcp [--data <dir>] [level]` runs over stdio with no window. This
+2. **Headless.** `c8h18-edit mcp [--asset <dir|file.c8pak>] [level]` runs over stdio with no window. This
    is for scripted or batch work and for clients that only launch stdio servers, e.g.
-   `claude mcp add c8h18-edit -- c8h18-edit mcp --data …`.
+   `claude mcp add c8h18-edit -- c8h18-edit mcp --asset …`.
 
 Tools. All coordinates are cells; large grids come back as compact run-length or base64 arrays.
 

@@ -13,7 +13,6 @@ pub use c8_audio::{container, music, ogg, tune, wav, xmidi};
 use crate::data::files;
 use mixer::Shared;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -35,7 +34,8 @@ pub struct Audio {
     oggs: OggCache,
 }
 
-type OggCache = Arc<Mutex<HashMap<PathBuf, (u64, Option<std::time::SystemTime>, Arc<ogg::OggTune>)>>>;
+/// Decoded OGG tunes by data path, with the length and hash of the bytes they came from.
+type OggCache = Arc<Mutex<HashMap<String, (u64, u64, Arc<ogg::OggTune>)>>>;
 
 impl Audio {
     /// Create the audio system. `enabled == false` (the -s switch) makes every call a no-op.
@@ -104,7 +104,9 @@ impl Audio {
     /// else slot 3 (8-bit 22 kHz, the shipped file) (also used by tools/tests).
     pub fn load_samples(&mut self, bank: usize) -> Result<Vec<Arc<wav::Sample>>, String> {
         if self.sound_dat.is_none() {
-            self.sound_dat = Some(files::read_raw("sound/sound.dat")?);
+            self.sound_dat = Some(files::read_raw("sound/sound.dat").inspect_err(|e| {
+                files::warn_asset("sound/sound.dat", Some(e), "sound effects are silent");
+            })?);
         }
         let file = self.sound_dat.as_ref().unwrap();
         let (slot, items) = container::load_sound_bank(file, bank)?;
@@ -229,14 +231,16 @@ impl Audio {
         }
         let rate = self.lock().out_rate;
         let generation = self.music_gen.fetch_add(1, Ordering::SeqCst) + 1;
-        if let Some(path) = tune::find_ogg(tune) {
+        if let Some(path) = tune::ogg_in_package(tune) {
             let fallback = self.make_fm_player(tune, rate).ok();
             let (shared, current, cache) = (self.shared.clone(), self.music_gen.clone(), self.oggs.clone());
+            // read now (the lookup may change later), decode on the helper thread
+            let bytes = files::read_raw(&path);
             let spawned = std::thread::Builder::new().name("ogg-decode".into()).spawn(move || {
-                let p: tune::TunePlayer = match load_ogg(&cache, &path) {
+                let p: tune::TunePlayer = match bytes.and_then(|b| load_ogg(&cache, &path, b)) {
                     Ok(t) => ogg::OggPlayer::new(t, rate).into(),
                     Err(e) => {
-                        log::warn!("{}: {e}; playing the FM tune", path.display());
+                        log::warn!("{path}: {e}; playing the FM tune");
                         match fallback {
                             Some(f) => f.into(),
                             None => return,
@@ -245,7 +249,7 @@ impl Audio {
                 };
                 let mut sh = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if current.load(Ordering::SeqCst) == generation {
-                    log::info!("tune {tune}: playing {} ({})", path.display(), if p.is_ogg() { "OGG" } else { "FM fallback" });
+                    log::info!("tune {tune}: playing {path} ({})", if p.is_ogg() { "OGG" } else { "FM fallback" });
                     sh.music = Some(p);
                     sh.music_full = full_volume;
                 }
@@ -270,10 +274,10 @@ impl Audio {
     /// else the XMIDI tune on the OPL3 (also used for offline rendering).
     #[allow(dead_code)] // used by examples/audio_test and the tests
     pub fn make_player(&mut self, tune: usize, rate: u32) -> Result<tune::TunePlayer, String> {
-        if let Some(path) = tune::find_ogg(tune) {
-            match load_ogg(&self.oggs, &path) {
+        if let Some(path) = tune::ogg_in_package(tune) {
+            match files::read_raw(&path).and_then(|b| load_ogg(&self.oggs, &path, b)) {
                 Ok(t) => return Ok(ogg::OggPlayer::new(t, rate).into()),
-                Err(e) => log::warn!("{}: {e}; using the FM tune", path.display()),
+                Err(e) => log::warn!("{path}: {e}; using the FM tune"),
             }
         }
         self.make_fm_player(tune, rate).map(Into::into)
@@ -282,13 +286,16 @@ impl Audio {
     /// The XMIDI tune `tune` of MUSIC.DAT slot 2 on the OPL3.
     pub fn make_fm_player(&mut self, tune: usize, rate: u32) -> Result<music::MusicPlayer, String> {
         if self.timbres.is_none() {
-            log::debug!("FM timbres from {:?}", files::resolve("sound/sample.opl"));
-            self.timbres = Some(music::TimbreBank::parse(&files::read_raw("sound/sample.opl")?)?);
+            let t = files::read_raw("sound/sample.opl").and_then(|d| music::TimbreBank::parse(&d));
+            self.timbres = Some(t.inspect_err(|e| {
+                files::warn_asset("sound/sample.opl", Some(e), "FM music is silent");
+            })?);
         }
         if self.tunes.is_none() {
-            log::debug!("tunes from {:?}", files::resolve("sound/music.dat"));
-            let file = files::read_raw("sound/music.dat")?;
-            self.tunes = Some(container::load_bank(&file, container::MUSIC_SLOTS, container::MUSIC_SLOT, 0)?);
+            let t = files::read_raw("sound/music.dat").and_then(|f| container::load_bank(&f, container::MUSIC_SLOTS, container::MUSIC_SLOT, 0));
+            self.tunes = Some(t.inspect_err(|e| {
+                files::warn_asset("sound/music.dat", Some(e), "FM music is silent");
+            })?);
         }
         let item = tune
             .checked_sub(1)
@@ -308,17 +315,18 @@ impl Audio {
 }
 
 /// Decode an OGG tune, or take it from the cache when the file is unchanged.
-fn load_ogg(cache: &OggCache, path: &Path) -> Result<Arc<ogg::OggTune>, String> {
-    let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-    let stamp = (meta.len(), meta.modified().ok());
-    if let Some((len, time, t)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(path) {
-        if (*len, *time) == stamp {
-            return Ok(t.clone());
-        }
+fn load_ogg(cache: &OggCache, rel: &str, bytes: Vec<u8>) -> Result<Arc<ogg::OggTune>, String> {
+    // FNV-1a: a changed file (e.g. a new "Test in game") is decoded again
+    let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let stamp = (bytes.len() as u64, hash);
+    if let Some((len, h, t)) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(rel)
+        && (*len, *h) == stamp
+    {
+        return Ok(t.clone());
     }
-    let t = Arc::new(ogg::decode(&std::fs::read(path).map_err(|e| e.to_string())?)?);
-    log::info!("{}: OGG tune, {:.1} s at {} Hz, loop {}..{}", path.display(), t.seconds(), t.rate, t.loop_start, t.loop_end);
-    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(path.to_path_buf(), (stamp.0, stamp.1, t.clone()));
+    let t = Arc::new(ogg::decode(&bytes)?);
+    log::info!("{rel}: OGG tune, {:.1} s at {} Hz, loop {}..{}", t.seconds(), t.rate, t.loop_start, t.loop_end);
+    cache.lock().unwrap_or_else(|e| e.into_inner()).insert(rel.to_string(), (stamp.0, stamp.1, t.clone()));
     Ok(t)
 }
 
