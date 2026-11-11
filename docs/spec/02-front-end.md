@@ -612,14 +612,25 @@ All from SOUND.DAT bank 0, played at the effects volume, centred:
 - DETAIL OPTIONS is never hidden (the port has no low-memory mode); NETWORK OPTIONS is always hidden (no network).
 - Choosing a SCREEN RESOLUTION item closes that submenu.
 - Track records of 0 count as "no record" (the port's fresh config starts the records at 0, see chapter 01).
-- Port addition, partial track sets: a track is **available** when its level `MAPS/LEVEL0-t.DAT` is found in the
-  asset package (a folder or a `.c8pak` bundle, any letter case). Its `DATA/TEXTU0-(t-1).DAT`, `DATA/SKY0-(t-1).DAT`
-  and `DATA/TABLE0-(t-1).DAT` are optional: when the race loads, a missing one prints a warning and is replaced by
-  placeholder textures (grey tiles with a grid), a vertical gradient sky (blue to the haze colour) or a colour table
-  computed from the palette (brightness rows fading to the haze, blend table, flat colours from the textures). Each
-  missing level prints `warning: missing asset MAPS/LEVEL0-t.DAT: track t is not available`. Its preview model
-  (model 50 + t − 1) and its minimap pictures are optional (missing models are drawn as nothing). With all six tracks
-  available everything below is the original behaviour. Otherwise:
+- Port addition, partial track sets: track t is **available** when all of these are found in the asset package (a
+  folder or a `.c8pak` bundle, any letter case): its level `MAPS/LEVEL0-t.DAT`, `DATA/TEXTU0-(t-1).DAT`, a sky
+  (`DATA/SKY0-(t-1).DAT` or the true-colour `DATA/SKY0-(t-1).PNG`, either counts), `DATA/TABLE0-(t-1).DAT` and its
+  carousel model `OBJECTS/DATA/TRACK0-(t-1).DAT` (model 50 + t − 1). Its minimap pictures in the shared `DATA/TRACK0-1`
+  sheet are optional. Discovery runs once, on first use, and only checks that the files exist: it prints nothing on
+  stdout (no `warning: missing asset` line) and logs through the `log` crate:
+  - no level: not offered, debug level `track t: no MAPS/LEVEL0-t.DAT, not offered`;
+  - level present but artifacts missing: the track is discarded (not in the carousel, the championship or the demo
+    race), warn level `track t discarded: missing A, B` naming each missing file, the sky as
+    `DATA/SKY0-(t-1).DAT or DATA/SKY0-(t-1).PNG`;
+  - no track left: error level `no complete track in the asset package: track selection and races are disabled`;
+  - afterwards info level `tracks available: [..]` (track numbers 1..6).
+
+  Discarded tracks never race, so the race loader's fallbacks for a missing `TEXTU`/`SKY`/`TABLE` (placeholder textures
+  of grey tiles with a grid, a vertical gradient sky from blue to the haze colour, a colour table computed from the
+  palette with brightness rows fading to the haze, blend table and flat colours from the textures; each with its
+  stdout warning) only apply on the debug paths (`--race`, `--demo`, `--sim`, with or without `--level`), which load
+  the given track without this check. With all six tracks available everything below is the original behaviour.
+  Otherwise:
   - The race number stays a track number (0..5) but always names an available track: any other value (fresh config,
     loaded slot, config from a full set) is replaced by the next available track after it, or else the first one.
   - Single race: the carousel holds only the available tracks, spaced 2048 / n apart (341 for six); with one track

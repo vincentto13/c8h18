@@ -1,42 +1,84 @@
 //! Which of the six tracks are present (port addition, spec 02 §17).
 //!
-//! A track counts as available when its level file `MAPS/LEVEL0-t.DAT` can be found through the
-//! normal lookup (the package, any letter case). Its terrain textures, sky and colour table are
-//! optional: missing ones are replaced when the race loads (placeholder textures, a gradient
-//! sky, a table computed from the palette), each with a warning. The original set has all six,
-//! so everything below is the identity there. Track numbers here are 0-based (track t of the
-//! spec is index t - 1), as the config's race number is.
+//! A track is offered when its level `MAPS/LEVEL0-t.DAT` and all of its own artifacts (terrain
+//! textures, a sky, colour table, carousel model; see [`artifacts`]) are found through the normal
+//! lookup (the package, any letter case). A track without a level is skipped silently (debug log
+//! only); a track with a level but missing artifacts is discarded with one warn-level log line.
+//! The check only asks whether the files exist, so it never prints the stdout
+//! `warning: missing asset` lines. The original set has all six, so everything below is the
+//! identity there. Track numbers here are 0-based (track t of the spec is index t - 1), as the
+//! config's race number is. The debug paths (`--race N`, `--level`, `--sim`) do not go through
+//! this and may still load an incomplete track, using the race loader's fallbacks.
 use std::sync::OnceLock;
 
 /// Number of track slots the game knows (names, lap tables, records, models 50..55).
 pub const SLOTS: usize = 6;
 
-/// The file track `t` (0-based) must have to be offered: its level. Its textures, sky, colour
-/// table, preview model (OBJECTS/DATA/TRACK0-t.DAT) and minimap pictures in DATA/TRACK0-1 are
-/// optional.
+/// The level of track `t` (0-based). Without it the track is not offered.
 pub fn level_file(t: usize) -> String {
     format!("MAPS/LEVEL0-{}.DAT", t + 1)
 }
 
-/// The tracks whose level exists according to `exists`, in track order.
+/// The per-track artifacts track `t` (0-based) needs besides its level, each as a list of
+/// alternatives (any one of them counts): terrain textures, the sky (palette `.DAT` or
+/// true-colour `.PNG`), the colour table and the carousel model. The minimap pictures in the
+/// shared `DATA/TRACK0-1` sheet are optional.
+pub fn artifacts(t: usize) -> [Vec<String>; 4] {
+    [
+        vec![format!("DATA/TEXTU0-{t}.DAT")],
+        vec![format!("DATA/SKY0-{t}.DAT"), format!("DATA/SKY0-{t}.PNG")],
+        vec![format!("DATA/TABLE0-{t}.DAT")],
+        vec![format!("OBJECTS/DATA/TRACK0-{t}.DAT")],
+    ]
+}
+
+/// What the files say about one track slot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    /// No level: not offered, silently.
+    NoLevel,
+    /// Level present, these artifacts missing (alternatives joined by " or "): discarded.
+    Incomplete(Vec<String>),
+    /// Level and all artifacts present: offered.
+    Complete,
+}
+
+/// The status of track `t` according to `exists`.
+pub fn status(t: usize, exists: &impl Fn(&str) -> bool) -> Status {
+    if !exists(&level_file(t)) {
+        return Status::NoLevel;
+    }
+    let missing: Vec<String> = artifacts(t)
+        .iter()
+        .filter(|alts| !alts.iter().any(|f| exists(f)))
+        .map(|alts| alts.join(" or "))
+        .collect();
+    if missing.is_empty() { Status::Complete } else { Status::Incomplete(missing) }
+}
+
+/// The complete tracks according to `exists`, in track order. Logs (never prints) the others:
+/// a debug line per track without a level, a warn line per discarded track, an error line
+/// when none is left.
 pub fn discover(exists: impl Fn(&str) -> bool) -> Vec<usize> {
-    (0..SLOTS).filter(|&t| exists(&level_file(t))).collect()
+    let mut v = Vec::new();
+    for t in 0..SLOTS {
+        match status(t, &exists) {
+            Status::Complete => v.push(t),
+            Status::NoLevel => log::debug!("track {}: no {}, not offered", t + 1, level_file(t)),
+            Status::Incomplete(m) => log::warn!("track {} discarded: missing {}", t + 1, m.join(", ")),
+        }
+    }
+    if v.is_empty() {
+        log::error!("no complete track in the asset package: track selection and races are disabled");
+    }
+    v
 }
 
 static AVAILABLE: OnceLock<Vec<usize>> = OnceLock::new();
 
 /// The available tracks (looked up once, on first use).
 pub fn available() -> &'static [usize] {
-    AVAILABLE.get_or_init(|| {
-        let v = discover(crate::data::files::exists);
-        for t in (0..SLOTS).filter(|t| !v.contains(t)) {
-            crate::data::files::warn_asset(&level_file(t), None, &format!("track {} is not available", t + 1));
-        }
-        if v.is_empty() {
-            log::error!("no track is available: races cannot be started");
-        }
-        v
-    })
+    AVAILABLE.get_or_init(|| discover(crate::data::files::exists))
 }
 
 /// The first available track (the championship's first race).
@@ -71,40 +113,129 @@ pub fn snap(t: usize) -> usize {
     snap_in(available(), t)
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::files::resolve_in;
+    use crate::data::files::{self, resolve_in};
+    use std::path::{Path, PathBuf};
 
-    #[test]
-    fn discovery_in_a_partial_data_folder() {
-        let d = std::env::temp_dir().join(format!("c8-tracks-{}", std::process::id()));
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("c8-tracks-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
-        for sub in ["MAPS", "DATA"] {
+        for sub in ["MAPS", "DATA", "OBJECTS/DATA"] {
             std::fs::create_dir_all(d.join(sub)).unwrap();
         }
-        // track 2 (index 1) with everything, in mixed case like a hand-made folder
-        for f in ["MAPS/level0-2.dat", "DATA/TEXTU0-1.DAT", "DATA/sky0-1.dat", "DATA/TABLE0-1.DAT"] {
+        d
+    }
+
+    fn put(d: &Path, files: &[&str]) {
+        for f in files {
             std::fs::write(d.join(f), b"x").unwrap();
         }
-        // track 4 (index 3): only its level, still available (the rest has fallbacks)
-        std::fs::write(d.join("MAPS/LEVEL0-4.DAT"), b"x").unwrap();
-        // textures, sky and table without a level do not make track 1 available
-        for f in ["DATA/TEXTU0-0.DAT", "DATA/SKY0-0.DAT", "DATA/TABLE0-0.DAT"] {
-            std::fs::write(d.join(f), b"x").unwrap();
-        }
-        let found = discover(|f| resolve_in(d.clone(), f).is_some());
-        assert_eq!(found, vec![1, 3]);
+    }
+
+    /// Everything track index `t` needs, palette sky.
+    fn full(t: usize) -> Vec<String> {
+        vec![
+            format!("MAPS/LEVEL0-{}.DAT", t + 1),
+            format!("DATA/TEXTU0-{t}.DAT"),
+            format!("DATA/SKY0-{t}.DAT"),
+            format!("DATA/TABLE0-{t}.DAT"),
+            format!("OBJECTS/DATA/TRACK0-{t}.DAT"),
+        ]
+    }
+
+    fn found(d: &Path) -> Vec<usize> {
+        discover(|f| resolve_in(d.to_path_buf(), f).is_some())
+    }
+
+    #[test]
+    fn missing_levels_are_skipped() {
+        let d = scratch("levels");
+        // track 2 complete, in mixed case like a hand-made folder
+        put(&d, &["MAPS/level0-2.dat", "DATA/textu0-1.dat", "DATA/Sky0-1.dat", "DATA/TABLE0-1.DAT", "objects/data/track0-1.dat"]);
+        // track 1's artifacts without its level do not make it available
+        put(&d, &full(0)[1..].iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(found(&d), vec![1]);
+        assert_eq!(status(0, &|f| resolve_in(d.clone(), f).is_some()), Status::NoLevel);
         let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
+    fn missing_sky_discards_the_track() {
+        let d = scratch("nosky");
+        let f: Vec<String> = full(2).into_iter().filter(|f| !f.contains("SKY")).collect();
+        put(&d, &f.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(found(&d), Vec::<usize>::new());
+        assert_eq!(
+            status(2, &|f| resolve_in(d.clone(), f).is_some()),
+            Status::Incomplete(vec!["DATA/SKY0-2.DAT or DATA/SKY0-2.PNG".into()])
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn png_only_sky_counts() {
+        let d = scratch("pngsky");
+        let mut f: Vec<String> = full(3).into_iter().filter(|f| !f.contains("SKY")).collect();
+        f.push("DATA/SKY0-3.PNG".into());
+        put(&d, &f.iter().map(String::as_str).collect::<Vec<_>>());
+        assert_eq!(found(&d), vec![3]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn missing_carousel_model_discards_the_track() {
+        let d = scratch("nomodel");
+        for t in [0, 4] {
+            put(&d, &full(t).iter().map(String::as_str).collect::<Vec<_>>());
+        }
+        std::fs::remove_file(d.join("OBJECTS/DATA/TRACK0-4.DAT")).unwrap();
+        // also drop track 1's textures and table: both are named
+        std::fs::remove_file(d.join("DATA/TEXTU0-0.DAT")).unwrap();
+        std::fs::remove_file(d.join("DATA/TABLE0-0.DAT")).unwrap();
+        assert_eq!(found(&d), Vec::<usize>::new());
+        let ex = |f: &str| resolve_in(d.clone(), f).is_some();
+        assert_eq!(status(4, &ex), Status::Incomplete(vec!["OBJECTS/DATA/TRACK0-4.DAT".into()]));
+        assert_eq!(status(0, &ex), Status::Incomplete(vec!["DATA/TEXTU0-0.DAT".into(), "DATA/TABLE0-0.DAT".into()]));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn discovery_prints_no_asset_warnings() {
+        // an empty package: every track lacks its level; plus a level-only track
+        let d = scratch("quiet");
+        put(&d, &["MAPS/LEVEL0-6.DAT"]);
+        let names: Vec<String> = (0..SLOTS).flat_map(|t| std::iter::once(level_file(t)).chain(artifacts(t).into_iter().flatten())).collect();
+        let before: Vec<String> = files::warned().into_iter().filter(|w| names.contains(w)).collect();
+        assert_eq!(found(&d), Vec::<usize>::new());
+        assert_eq!(discover(|_| false), Vec::<usize>::new());
+        let after: Vec<String> = files::warned().into_iter().filter(|w| names.contains(w)).collect();
+        assert_eq!(before, after, "discovery must not go through warn_asset");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    fn repo(dir: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(dir)
+    }
+
+    #[test]
     fn full_original_set_is_found() {
-        let res = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources");
+        let res = repo("resources");
         if !res.join("MAPS").is_dir() {
             return;
         }
-        assert_eq!(discover(|f| resolve_in(res.clone(), f).is_some()), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(found(&res), vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn custom_set_offers_track_one() {
+        let c = repo("assets/custom");
+        if !c.join("MAPS").is_dir() {
+            return;
+        }
+        assert_eq!(found(&c), vec![0]);
     }
 
     #[test]
