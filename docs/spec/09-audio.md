@@ -205,8 +205,13 @@ stops all samples and shuts the sound system down; the music does not carry over
 
 ## 9. Port deviations
 
-- Music is always the FM variant (`.XMI` with `SAMPLE.OPL`) played on an emulated OPL3; samples always come from the
-  8-bit 22050 Hz slot and are mixed in software. Volumes are linear gains, not the AIL driver's curves.
+- Music is always the FM variant (`.XMI` with `SAMPLE.OPL`) played on an emulated OPL3. Samples are mixed in
+  software. Volumes are linear gains, not the AIL driver's curves.
+- The port picks the SOUND.DAT slot for each bank on its own, with no driver involved: it uses **slot 0 (16-bit
+  44100 Hz)** when the file has that bank there, and falls back to **slot 3 (8-bit 22050 Hz)** otherwise. The shipped
+  file has no slot 0, so it plays from slot 3 as before. Each sample plays at its own WAV header rate (rate 100 % = as
+  recorded), so the rate percentages in this chapter mean the same in both slots. The editor shows every slot the file
+  has and converts an imported WAV to the slot's bits and rate.
 - The port loops the race tune and the intro tune.
 - The port's fresh config has the stereo flag set (the original's is mono); a config with the flag clear gives the
   mono behaviour of section 6.

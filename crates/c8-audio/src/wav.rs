@@ -100,6 +100,12 @@ pub fn write_i16(rate: u32, channels: u16, data: &[f32]) -> Vec<u8> {
 /// Convert any WAV file (8/16-bit, mono/stereo, any rate) to 8-bit unsigned mono at `rate`, the
 /// game's format. Stereo is mixed down; the rate is converted by linear interpolation.
 pub fn convert_to_u8(d: &[u8], rate: u32) -> Result<Vec<u8>, String> {
+    Ok(convert_to_f32(d, rate)?.iter().map(|&x| (x * 128.0 + 128.0).round().clamp(0.0, 255.0) as u8).collect())
+}
+
+/// Convert any WAV file to -1..1 mono samples at `rate` (stereo mixed down, linear
+/// interpolation); write the result with [`write_i16`] for the 16-bit slots.
+pub fn convert_to_f32(d: &[u8], rate: u32) -> Result<Vec<f32>, String> {
     if d.len() < 12 || &d[0..4] != b"RIFF" || &d[8..12] != b"WAVE" {
         return Err("not a WAV file".into());
     }
@@ -113,9 +119,22 @@ pub fn convert_to_u8(d: &[u8], rate: u32) -> Result<Vec<u8>, String> {
             let f = (p - k as f64) as f32;
             let a = s.data.get(k).copied().unwrap_or(0.0);
             let b = s.data.get(k + 1).copied().unwrap_or(a);
-            ((a + (b - a) * f) * 128.0 + 128.0).round().clamp(0.0, 255.0) as u8
+            a + (b - a) * f
         })
         .collect())
+}
+
+/// Bits per sample of a WAV file (0 if it has no `fmt ` chunk).
+pub fn bits(d: &[u8]) -> u16 {
+    let mut p = 12;
+    while p + 8 <= d.len() && d.len() >= 12 {
+        let len = u32::from_le_bytes([d[p + 4], d[p + 5], d[p + 6], d[p + 7]]) as usize;
+        if &d[p..p + 4] == b"fmt " && p + 24 <= d.len() {
+            return u16::from_le_bytes([d[p + 22], d[p + 23]]);
+        }
+        p = (p + 8).saturating_add(len + (len & 1));
+    }
+    0
 }
 
 /// Like [`parse`], but mixes all channels down instead of taking the first, and fails on
@@ -187,5 +206,12 @@ mod tests {
         let st: Vec<f32> = (0..4000).flat_map(|i| [(i as f32 * 0.01).sin() * 0.5; 2]).collect();
         let c = convert_to_u8(&write_i16(44100, 2, &st), 11025).unwrap();
         assert_eq!(c.len(), 1000);
+        // 8-bit 22 kHz up to 16-bit 44.1 kHz mono
+        let f = convert_to_f32(&w, 44100).unwrap();
+        assert_eq!(f.len(), 2000);
+        let w16 = write_i16(44100, 1, &f);
+        assert_eq!((bits(&w16), bits(&w)), (16, 8));
+        let s16 = parse("", &w16);
+        assert_eq!((s16.rate, s16.data.len()), (44100, 2000));
     }
 }

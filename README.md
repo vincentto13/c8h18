@@ -294,6 +294,18 @@ Resources: `docs://format` (units, layers, entity types, what a race needs), `le
 drawn from scratch: every entry keeps the original's width, height and ink box, so text lays out
 exactly as before, but the glyphs are new. Play with them with `c8h18 --override assets/fonts`.
 
+## Sound effects
+
+`assets/sound/SOUND/SOUND.DAT` holds new sound effects synthesised from scratch: both banks (the 35
+race and front-end entries, NULL placeholders kept, and the 14 intro sounds) in slot 0 (16-bit
+44.1 kHz) and in slots 3, 4 and 5 (8-bit 22 and 11 kHz, converted from the same sounds). Play with
+them with `c8h18 --override assets/sound`.
+
+The game takes each SOUND.DAT bank from slot 0 (16-bit 44.1 kHz) when the file has it there and
+falls back to slot 3 (8-bit 22 kHz) otherwise, so the original file plays as before (spec 09 §9).
+The editor's sound panel shows every slot the file has; "Replace from WAV…" converts to the slot's
+format (16-bit 44.1 kHz in slot 0), in every slot of the bank at once with "Replace in all formats".
+
 ## Debug automation
 
 `C8H18_AUTO="frame:op:arg;..."` runs scripted input. The ops are `shot:<png path>`,

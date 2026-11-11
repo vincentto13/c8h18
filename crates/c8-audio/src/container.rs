@@ -8,8 +8,11 @@ fn u32le(d: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
 }
 
-/// SOUND.DAT format slot used by the port: 8-bit 22050 Hz.
+/// SOUND.DAT format slot used by the port when slot [`SOUND_SLOT_HQ`] is absent: 8-bit 22050 Hz
+/// (the only rate the shipped file has besides 11025 Hz).
 pub const SOUND_SLOT: usize = 3;
+/// SOUND.DAT format slot the port prefers: 16-bit 44100 Hz (empty in the shipped file).
+pub const SOUND_SLOT_HQ: usize = 0;
 pub const SOUND_SLOTS: usize = 6;
 /// MUSIC.DAT format slot used by the port: FM (.XMI).
 pub const MUSIC_SLOT: usize = 2;
@@ -77,6 +80,15 @@ pub fn load_bank(file: &[u8], nslots: usize, slot: usize, bank: usize) -> Result
         items.push(Item { name, data: data[start..end].to_vec() });
     }
     Ok(items)
+}
+
+/// Load bank `bank` of SOUND.DAT for the port: from slot [`SOUND_SLOT_HQ`] (16-bit 44.1 kHz) when
+/// that slot holds the bank, else from slot [`SOUND_SLOT`] (8-bit 22 kHz). Returns the slot used.
+pub fn load_sound_bank(file: &[u8], bank: usize) -> Result<(usize, Vec<Item>), String> {
+    match load_bank(file, SOUND_SLOTS, SOUND_SLOT_HQ, bank) {
+        Ok(items) if !items.is_empty() => Ok((SOUND_SLOT_HQ, items)),
+        _ => load_bank(file, SOUND_SLOTS, SOUND_SLOT, bank).map(|items| (SOUND_SLOT, items)),
+    }
 }
 
 /// A catalogue item with its full 32-byte entry (fields other than name, offset and length are
@@ -208,6 +220,39 @@ mod tests {
     fn original(name: &str) -> Option<Vec<u8>> {
         let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../resources/SOUND").join(name);
         std::fs::read(p).ok()
+    }
+
+    /// A SOUND.DAT-shaped container with one-item banks in the given (bank, slot) places; the item
+    /// name records where it came from.
+    fn synthetic(places: &[(usize, usize)]) -> Vec<u8> {
+        let nbanks = places.iter().map(|p| p.0 + 1).max().unwrap_or(0);
+        let mut c = Container { slots: SOUND_SLOTS, banks: vec![vec![None; SOUND_SLOTS]; nbanks] };
+        for &(b, s) in places {
+            let name = format!("B{b}S{s}.WAV");
+            c.banks[b][s] = Some(Slot { header: [0; 32], items: vec![Entry { name, data: vec![1, 2, 3], raw: [0; 32] }] });
+        }
+        c.encode()
+    }
+
+    #[test]
+    fn sound_bank_prefers_16_bit_slot() {
+        // only the 8-bit slots (the shipped layout): slot 3
+        let f = synthetic(&[(0, 3), (0, 4), (1, 3), (1, 4)]);
+        let (slot, items) = load_sound_bank(&f, 0).unwrap();
+        assert_eq!((slot, items[0].name.as_str()), (SOUND_SLOT, "B0S3.WAV"));
+        // slot 0 present for bank 0 only: bank 0 from slot 0, bank 1 falls back to slot 3
+        let f = synthetic(&[(0, 0), (0, 3), (1, 3)]);
+        let (slot, items) = load_sound_bank(&f, 0).unwrap();
+        assert_eq!((slot, items[0].name.as_str()), (SOUND_SLOT_HQ, "B0S0.WAV"));
+        let (slot, items) = load_sound_bank(&f, 1).unwrap();
+        assert_eq!((slot, items[0].name.as_str()), (SOUND_SLOT, "B1S3.WAV"));
+        // neither: an error
+        assert!(load_sound_bank(&synthetic(&[(0, 4)]), 0).is_err());
+        // the shipped file has no slot 0
+        if let Some(file) = original("SOUND.DAT") {
+            assert_eq!(load_sound_bank(&file, 0).unwrap().0, SOUND_SLOT);
+            assert_eq!(load_sound_bank(&file, 1).unwrap().0, SOUND_SLOT);
+        }
     }
 
     #[test]

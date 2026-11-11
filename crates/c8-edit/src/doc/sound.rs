@@ -6,12 +6,14 @@ use super::Document;
 use crate::audio;
 use crate::resources::Kind;
 use eframe::egui::{self, Color32, RichText, Sense, Stroke, Vec2};
-use c8_audio::container::{Container, Entry, MUSIC_SLOT, MUSIC_SLOTS, SOUND_SLOT, SOUND_SLOTS};
+use c8_audio::container::{Container, Entry, MUSIC_SLOT, MUSIC_SLOTS, SOUND_SLOT, SOUND_SLOTS, SOUND_SLOT_HQ};
 use c8_audio::{music, wav, xmidi};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const SOUND_FORMATS: [&str; 6] = ["16-bit 44 kHz", "16-bit 22 kHz", "16-bit 11 kHz", "8-bit 22 kHz (used by the port)", "8-bit 11 kHz", "8-bit 11 kHz, reduced set"];
+const SOUND_FORMATS: [&str; 6] = ["16-bit 44 kHz (used by the port when present)", "16-bit 22 kHz", "16-bit 11 kHz", "8-bit 22 kHz (used by the port otherwise)", "8-bit 11 kHz", "8-bit 11 kHz, reduced set"];
+/// Sample rate and bits of each SOUND.DAT format slot (spec 01 §11.1).
+const SOUND_SLOT_FORMAT: [(u32, u16); 6] = [(44100, 16), (22050, 16), (11025, 16), (22050, 8), (11025, 8), (11025, 8)];
 const MUSIC_FORMATS: [&str; 4] = ["General MIDI (.GEN)", "Roland MT-32 (.ROL)", "FM / OPL (.XMI, used by the port)", "Wavetable (.WTB)"];
 
 /// What a sample of bank 0 is used for (spec 09).
@@ -94,7 +96,7 @@ pub struct SoundDoc {
     bank: usize,
     slot: usize,
     sel: usize,
-    /// replace a sample in all 8-bit slots (3, 4, 5) at once
+    /// replace a sample in every format slot of the bank at once
     all_slots: bool,
     timbres: Option<music::TimbreBank>,
     /// decoded selected sample: (bank, slot, item, generation) → data
@@ -112,6 +114,8 @@ impl SoundDoc {
         let music = path.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("music.dat"));
         let (slots, slot) = if music { (MUSIC_SLOTS, MUSIC_SLOT) } else { (SOUND_SLOTS, SOUND_SLOT) };
         let c = Container::parse(&file, slots).map_err(|e| format!("{rel}: {e}"))?;
+        // open on the slot the game plays: the 16-bit 44 kHz one when present
+        let slot = if !music && matches!(c.banks.first().map(|b| &b[SOUND_SLOT_HQ]), Some(Some(_))) { SOUND_SLOT_HQ } else { slot };
         let timbres = if music { c8_data::files::read_raw("sound/sample.opl").ok().and_then(|d| music::TimbreBank::parse(&d).ok()) } else { None };
         Ok(SoundDoc { path, rel, music, c, history: History::default(), bank: 0, slot, sel: 0, all_slots: true, timbres, wave: None, lengths: None, generation: 0, message: String::new(), test: false })
     }
@@ -191,17 +195,23 @@ impl SoundDoc {
     /// Replace the selected sample with a WAV file, converted to each slot's format.
     fn import_wav(&mut self, path: &Path) -> Result<String, String> {
         let d = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let slots: Vec<usize> = if self.all_slots && (3..=5).contains(&self.slot) { vec![3, 4, 5] } else { vec![self.slot] };
+        // every format slot present in this bank, or only the shown one
+        let slots: Vec<usize> = if self.all_slots { (0..SOUND_SLOTS).collect() } else { vec![self.slot] };
         let mut items = Vec::new();
         for s in slots {
             let Some(Some(slot)) = self.c.banks.get(self.bank).and_then(|b| b.get(s)) else { continue };
             let Some(old) = slot.items.get(self.sel) else { continue };
-            // keep the slot's rate (the old sample's, or the slot's nominal one)
-            let old_rate = wav::parse("", &c8_data::rnc::maybe_unpack(old.data.clone()).unwrap_or_default()).rate;
-            let rate = if s == 3 { 22050 } else if old_rate > 0 && old_rate != 22050 { old_rate } else { 11025 };
-            let pcm = wav::convert_to_u8(&d, rate)?;
             let mut new = old.clone();
-            new.data = wav::write_u8(rate, &pcm);
+            if SOUND_SLOT_FORMAT[s].1 == 16 {
+                // 16-bit mono at the slot's nominal rate
+                let rate = SOUND_SLOT_FORMAT[s].0;
+                new.data = wav::write_i16(rate, 1, &wav::convert_to_f32(&d, rate)?);
+            } else {
+                // keep the slot's rate (the old sample's, or the slot's nominal one)
+                let old_rate = wav::parse("", &c8_data::rnc::maybe_unpack(old.data.clone()).unwrap_or_default()).rate;
+                let rate = if s == 3 { 22050 } else if old_rate > 0 && old_rate != 22050 { old_rate } else { 11025 };
+                new.data = wav::write_u8(rate, &wav::convert_to_u8(&d, rate)?);
+            }
             items.push((self.bank, s, self.sel, old.clone(), new));
         }
         if items.is_empty() {
@@ -271,7 +281,8 @@ impl SoundDoc {
             let sel = self.sel;
             self.play(sel);
         }
-        ui.label(RichText::new(format!("{} samples at {} Hz, {:.2} s, 8-bit mono; click to play", n, s.rate, s.duration())).small().color(Color32::GRAY));
+        let bits = self.items().get(self.sel).map(|it| wav::bits(&c8_data::rnc::maybe_unpack(it.data.clone()).unwrap_or_default())).unwrap_or(8);
+        ui.label(RichText::new(format!("{} samples at {} Hz, {:.2} s, {bits}-bit mono; click to play", n, s.rate, s.duration())).small().color(Color32::GRAY));
     }
 }
 
@@ -463,14 +474,12 @@ impl Document for SoundDoc {
                     self.message = std::fs::write(&p, d).map(|_| format!("wrote {}", p.display())).unwrap_or_else(|e| e.to_string());
                 }
             }
-            if ui.button("Replace from WAV…").on_hover_text("Any PCM WAV; converted to 8-bit mono at the slot's rate").clicked() {
+            if ui.button("Replace from WAV…").on_hover_text("Any PCM WAV; converted to mono at the slot's bits and rate (16-bit 44.1 kHz in slot 0)").clicked() {
                 if let Some(p) = rfd::FileDialog::new().add_filter("WAV", &["wav"]).pick_file() {
                     self.message = self.import_wav(&p).unwrap_or_else(|e| e);
                 }
             }
-            if (3..=5).contains(&self.slot) {
-                ui.checkbox(&mut self.all_slots, "Replace in all 8-bit formats").on_hover_text("Slots 3, 4 and 5 (22 and 11 kHz); the port plays slot 3");
-            }
+            ui.checkbox(&mut self.all_slots, "Replace in all formats").on_hover_text("Every format slot this bank has, each in its own bits and rate; the port plays the 16-bit 44 kHz slot when present, else the 8-bit 22 kHz one");
         }
         if !self.message.is_empty() {
             ui.label(RichText::new(&self.message).small());
@@ -526,5 +535,37 @@ mod tests {
         assert_eq!(m.items()[0].data, xmi);
         assert!(m.import_xmi(&res("SOUND/SAMPLE.OPL")).is_err());
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn replace_sample_in_16_bit_slot() {
+        use c8_audio::container::Slot;
+        // a bank with slot 0 (16-bit 44.1 kHz) and slot 3 (8-bit 22 kHz), one item each
+        let entry = |data: Vec<u8>| Entry { name: "A.WAV".into(), data, raw: [0; 32] };
+        let mut c = Container { slots: SOUND_SLOTS, banks: vec![vec![None; SOUND_SLOTS]] };
+        c.banks[0][0] = Some(Slot { header: [0; 32], items: vec![entry(wav::write_i16(44100, 1, &[0.0; 100]))] });
+        c.banks[0][3] = Some(Slot { header: [0; 32], items: vec![entry(wav::write_u8(22050, &[128; 50]))] });
+        let dir = std::env::temp_dir();
+        let (dat, tone) = (dir.join("hiedit-test-16.dat"), dir.join("hiedit-test-16.wav"));
+        std::fs::write(&dat, c.encode()).unwrap();
+        let wave: Vec<f32> = (0..11025).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+        std::fs::write(&tone, wav::write_i16(22050, 1, &wave)).unwrap();
+        let mut d = SoundDoc::open(dat.clone(), "SOUND/SOUND.DAT".into()).unwrap();
+        assert_eq!(d.slot, SOUND_SLOT_HQ, "opens on the slot the game plays");
+        // only the shown slot
+        d.all_slots = false;
+        d.import_wav(&tone).unwrap();
+        let file = d.c.encode();
+        let s0 = &c8_audio::container::load_bank(&file, SOUND_SLOTS, 0, 0).unwrap()[0].data;
+        let s3 = &c8_audio::container::load_bank(&file, SOUND_SLOTS, 3, 0).unwrap()[0].data;
+        assert_eq!((wav::bits(s0), wav::parse("", s0).rate, wav::parse("", s0).data.len()), (16, 44100, 22050));
+        assert_eq!(wav::parse("", s3).data.len(), 50);
+        // all formats: slot 3 gets 8-bit 22 kHz
+        d.all_slots = true;
+        d.import_wav(&tone).unwrap();
+        let file = d.c.encode();
+        let s3 = &c8_audio::container::load_bank(&file, SOUND_SLOTS, 3, 0).unwrap()[0].data;
+        assert_eq!((wav::bits(s3), wav::parse("", s3).rate, wav::parse("", s3).data.len()), (8, 22050, 11025));
+        let _ = (std::fs::remove_file(&dat), std::fs::remove_file(&tone));
     }
 }

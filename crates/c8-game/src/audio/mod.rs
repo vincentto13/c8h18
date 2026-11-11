@@ -1,7 +1,8 @@
 //! Audio system (spec chapter 09). PUBLIC API IS FIXED — other modules call it.
 //! Implementation: software mixer on cpal, SOUND.DAT banks, XMIDI music on an emulated OPL3.
 //!
-//! Samples come from SOUND.DAT slot 3 (8-bit 22050 Hz) and are resampled by linear
+//! Samples come from SOUND.DAT slot 0 (16-bit 44100 Hz) when the file has it, else slot 3
+//! (8-bit 22050 Hz, the shipped file), and are resampled by linear
 //! interpolation to the device rate; music is MUSIC.DAT slot 2 (FM .XMI) driven through the
 //! GTL timbre bank SAMPLE.OPL on an emulated OPL3, sequenced at 120 Hz inside the callback.
 //! All state shared with the callback sits behind one `Arc<Mutex<Shared>>`.
@@ -70,7 +71,8 @@ impl Audio {
         self.shared.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Load SOUND.DAT bank (0 = game, 1 = intro) from the 8-bit 22 kHz slot; replaces the current bank.
+    /// Load SOUND.DAT bank (0 = game, 1 = intro) from the 16-bit 44.1 kHz slot, or the 8-bit 22 kHz
+    /// one when that is absent; replaces the current bank.
     pub fn load_bank(&mut self, bank: usize) {
         if !self.enabled {
             return;
@@ -89,13 +91,15 @@ impl Audio {
         sh.bank = samples;
     }
 
-    /// Decode bank `bank` of SOUND.DAT slot 3 (also used by tools/tests).
+    /// Decode bank `bank` of SOUND.DAT: slot 0 (16-bit 44.1 kHz) when the file has the bank there,
+    /// else slot 3 (8-bit 22 kHz, the shipped file) (also used by tools/tests).
     pub fn load_samples(&mut self, bank: usize) -> Result<Vec<Arc<wav::Sample>>, String> {
         if self.sound_dat.is_none() {
             self.sound_dat = Some(files::read_raw("sound/sound.dat")?);
         }
         let file = self.sound_dat.as_ref().unwrap();
-        let items = container::load_bank(file, container::SOUND_SLOTS, container::SOUND_SLOT, bank)?;
+        let (slot, items) = container::load_sound_bank(file, bank)?;
+        log::debug!("SOUND.DAT bank {bank}: {} samples from slot {slot}", items.len());
         Ok(items
             .into_iter()
             .map(|it| {
