@@ -63,6 +63,43 @@ struct Opts {
     intro: bool,
     /// debug: start a race on this track directly (demo if the flag is set)
     race: Option<(usize, bool)>,
+    /// headless capture mode: render size, no window (see `run_headless`)
+    headless: Option<(u32, u32)>,
+}
+
+/// Default render size of `--headless`.
+const HEADLESS_SIZE: (u32, u32) = (1920, 1080);
+/// Fixed frame rate of `--headless`: each display frame advances the game by 1/60 s.
+const HEADLESS_FPS: f64 = 60.0;
+
+/// `WxH` (e.g. `1920x1080`) as a render size; None when malformed or out of 16..=8192.
+fn parse_size(s: &str) -> Option<(u32, u32)> {
+    let (w, h) = s.to_ascii_lowercase().split_once('x').map(|(w, h)| (w.trim().parse().ok(), h.trim().parse().ok()))?;
+    let (w, h): (u32, u32) = (w?, h?);
+    let ok = |v: u32| (16..=8192).contains(&v);
+    (ok(w) && ok(h)).then_some((w, h))
+}
+
+/// Headless capture mode: no winit event loop, window or surface. The game runs at a fixed
+/// HEADLESS_FPS, every frame is drawn into an offscreen texture and submitted, and the
+/// C8H18_AUTO script drives it as in a window (`shot` saves that frame). It ends at `quit`,
+/// when the game quits, or one frame after the script's last op.
+fn run_headless(opts: &Opts, (w, h): (u32, u32)) -> Result<(), String> {
+    let gfx = pollster::block_on(Gfx::new_headless(w, h))?;
+    let mut game = Game::new(gfx, opts);
+    game.fixed_dt = Some(1.0 / HEADLESS_FPS);
+    let last = game.auto.events.iter().map(|e| e.0).max().ok_or("--headless needs a C8H18_AUTO script (end it with `quit`)")?;
+    while game.auto.frame <= last {
+        game.auto.frame += 1;
+        if game.run_auto() {
+            break;
+        }
+        game.update();
+        if game.exit {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn debug_setup(track: usize, demo: bool, cfg: &Config) -> RaceSetup {
@@ -132,6 +169,10 @@ struct Game {
     acc: f64,
     sound: bool,
     auto: Auto,
+    /// the game asked to end (the window loop exits, the headless loop stops)
+    exit: bool,
+    /// headless capture mode: fixed time step per frame instead of the wall clock
+    fixed_dt: Option<f64>,
 }
 
 struct App {
@@ -163,9 +204,93 @@ impl Game {
         self.start_fade(1.0, 32, After::Nothing);
     }
 
-    fn update(&mut self, el: &ActiveEventLoop) {
+    /// Load the assets and settings and start in the mode the options ask for.
+    fn new(mut gfx: Gfx, opts: &Opts) -> Game {
+        pad::load_settings();
+        video::load();
+        let _ = data::strings::load();
+        let assets = Assets::load();
+        gfx.set_palette(&assets.palette.vga);
+        gfx.set_colour_table(&assets.fe_table.data);
+        gfx.set_model_atlas(&assets.atlas.pix, assets.atlas.h);
+        gfx.set_tmaps(&assets.tmaps);
+        let cfg = Config::load();
+        let avail = tracks::available();
+        log::info!("tracks available: {:?}", avail.iter().map(|t| t + 1).collect::<Vec<_>>());
+        let mut audio = Audio::new(opts.sound);
+        audio.set_stereo(cfg.stereo());
+        audio.set_effects_volume(cfg.effects_volume());
+        audio.set_music_volume(cfg.music_volume());
+        if !opts.intro {
+            audio.load_bank(0);
+        }
+        let (cw, ch) = gfx.canvas_dims();
+        let bg = Canvas::new(cw, ch, assets.fe_table.clone());
+        let fg = Canvas::new(cw, ch, Rc::clone(&assets.fe_table));
+        let mode = if let Some((t, demo)) = opts.race {
+            audio.load_bank(0);
+            Mode::Loading(debug_setup(t, demo, &cfg), 0)
+        } else if opts.intro {
+            // the movie is optional: without (or with an unreadable) INTRO.DAT go on as with --no-intro
+            match intro::Intro::new() {
+                Ok(i) => Mode::Intro(i),
+                Err(e) => {
+                    data::files::warn_asset("data/intro.dat", Some(&e), "skipping the intro movie");
+                    audio.load_bank(0);
+                    Mode::Title(0.0)
+                }
+            }
+        } else {
+            Mode::Title(0.0)
+        };
+        Game {
+            gfx,
+            assets,
+            audio,
+            cfg,
+            input: Input::default(),
+            pad: pad::Pad::new(),
+            bg,
+            fg,
+            mode,
+            fade: None,
+            bright: 1.0,
+            last: Instant::now(),
+            acc: 0.0,
+            sound: opts.sound,
+            auto: Auto::from_env(),
+            exit: false,
+            fixed_dt: None,
+        }
+    }
+
+    /// Run this frame's C8H18_AUTO ops; true = `quit`.
+    fn run_auto(&mut self) -> bool {
+        let f = self.auto.frame;
+        for (_, op, arg) in self.auto.events.iter().filter(|e| e.0 == f) {
+            match op.as_str() {
+                "shot" => self.gfx.shot = Some(arg.clone()),
+                "key" => {
+                    if let Some(code) = key_from_name(arg) {
+                        self.input.pressed.push(KeyPress { code, shift: false, right_shift: false, ctrl: false, alt: false, ch: None });
+                    } else if let Some(c) = arg.chars().next() {
+                        self.input.pressed.push(KeyPress { code: KeyCode::KeyA, shift: false, right_shift: false, ctrl: false, alt: false, ch: Some(c) });
+                    }
+                }
+                "hold" => { if let Some(code) = key_from_name(arg) { self.input.held.insert(code); } }
+                "release" => { if let Some(code) = key_from_name(arg) { self.input.held.remove(&code); } }
+                "padhold" => { if let Some(b) = pad::btn_from_name(arg) { self.pad.fake[b as usize] = true; } }
+                "padrelease" => { if let Some(b) = pad::btn_from_name(arg) { self.pad.fake[b as usize] = false; } }
+                "quit" => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn update(&mut self) {
         let now = Instant::now();
-        let dt = (now - self.last).as_secs_f64().min(0.25);
+        let dt = self.fixed_dt.unwrap_or_else(|| (now - self.last).as_secs_f64().min(0.25));
         self.last = now;
         self.pad.poll(dt);
         // menus and the "any key" screens see pad presses as keys; the race reads the pad itself
@@ -200,7 +325,7 @@ impl Game {
                     After::Exit => {
                         self.cfg.save();
                         self.mode = Mode::Quit;
-                        el.exit();
+                        self.exit = true;
                     }
                 }
             }
@@ -279,7 +404,7 @@ impl Game {
                     if res.quit_game {
                         self.cfg.save();
                         self.mode = Mode::Quit;
-                        el.exit();
+                        self.exit = true;
                         return;
                     }
                     let entry = if res.demo { FeEntry::AfterDemo } else { FeEntry::AfterRace(res) };
@@ -350,61 +475,8 @@ impl ApplicationHandler for App {
             .with_title("C8H18")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(el.create_window(attrs).expect("window"));
-        let mut gfx = pollster::block_on(Gfx::new(window.clone()));
-        pad::load_settings();
-        video::load();
-        let _ = data::strings::load();
-        let assets = Assets::load();
-        gfx.set_palette(&assets.palette.vga);
-        gfx.set_colour_table(&assets.fe_table.data);
-        gfx.set_model_atlas(&assets.atlas.pix, assets.atlas.h);
-        gfx.set_tmaps(&assets.tmaps);
-        let cfg = Config::load();
-        let avail = tracks::available();
-        log::info!("tracks available: {:?}", avail.iter().map(|t| t + 1).collect::<Vec<_>>());
-        let mut audio = Audio::new(self.opts.sound);
-        audio.set_stereo(cfg.stereo());
-        audio.set_effects_volume(cfg.effects_volume());
-        audio.set_music_volume(cfg.music_volume());
-        if !self.opts.intro {
-            audio.load_bank(0);
-        }
-        let (cw, ch) = gfx.canvas_dims();
-        let bg = Canvas::new(cw, ch, assets.fe_table.clone());
-        let fg = Canvas::new(cw, ch, Rc::clone(&assets.fe_table));
-        let mode = if let Some((t, demo)) = self.opts.race {
-            audio.load_bank(0);
-            Mode::Loading(debug_setup(t, demo, &cfg), 0)
-        } else if self.opts.intro {
-            // the movie is optional: without (or with an unreadable) INTRO.DAT go on as with --no-intro
-            match intro::Intro::new() {
-                Ok(i) => Mode::Intro(i),
-                Err(e) => {
-                    data::files::warn_asset("data/intro.dat", Some(&e), "skipping the intro movie");
-                    audio.load_bank(0);
-                    Mode::Title(0.0)
-                }
-            }
-        } else {
-            Mode::Title(0.0)
-        };
-        self.game = Some(Game {
-            gfx,
-            assets,
-            audio,
-            cfg,
-            input: Input::default(),
-            pad: pad::Pad::new(),
-            bg,
-            fg,
-            mode,
-            fade: None,
-            bright: 1.0,
-            last: Instant::now(),
-            acc: 0.0,
-            sound: self.opts.sound,
-            auto: Auto::from_env(),
-        });
+        let gfx = pollster::block_on(Gfx::new(window.clone()));
+        self.game = Some(Game::new(gfx, &self.opts));
         window.request_redraw();
     }
 
@@ -446,27 +518,18 @@ impl ApplicationHandler for App {
                 if std::env::var_os("C8H18_FPS").is_some() && game.auto.frame % 120 == 0 {
                     eprintln!("frame {} at {:?}", game.auto.frame, std::time::SystemTime::now());
                 }
-                let f = game.auto.frame;
-                for (_, op, arg) in game.auto.events.iter().filter(|e| e.0 == f) {
-                    match op.as_str() {
-                        "shot" => game.gfx.shot = Some(arg.clone()),
-                        "key" => {
-                            if let Some(code) = key_from_name(arg) {
-                                game.input.pressed.push(KeyPress { code, shift: false, right_shift: false, ctrl: false, alt: false, ch: None });
-                            } else if let Some(c) = arg.chars().next() {
-                                game.input.pressed.push(KeyPress { code: KeyCode::KeyA, shift: false, right_shift: false, ctrl: false, alt: false, ch: Some(c) });
-                            }
-                        }
-                        "hold" => { if let Some(code) = key_from_name(arg) { game.input.held.insert(code); } }
-                        "release" => { if let Some(code) = key_from_name(arg) { game.input.held.remove(&code); } }
-                        "padhold" => { if let Some(b) = pad::btn_from_name(arg) { game.pad.fake[b as usize] = true; } }
-                        "padrelease" => { if let Some(b) = pad::btn_from_name(arg) { game.pad.fake[b as usize] = false; } }
-                        "quit" => { el.exit(); return; }
-                        _ => {}
-                    }
+                if game.run_auto() {
+                    el.exit();
+                    return;
                 }
-                game.update(el);
-                game.gfx.window.request_redraw();
+                game.update();
+                if game.exit {
+                    el.exit();
+                    return;
+                }
+                if let Some(w) = &game.gfx.window {
+                    w.request_redraw();
+                }
             }
             _ => {}
         }
@@ -494,7 +557,7 @@ fn use_package(asset: Option<&std::path::Path>) {
 
 fn main() {
     env_logger::init();
-    let mut opts = Opts { sound: true, intro: true, race: None };
+    let mut opts = Opts { sound: true, intro: true, race: None, headless: None };
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut asset: Option<std::path::PathBuf> = None;
     let mut sim = None;
@@ -534,6 +597,15 @@ fn main() {
                 data::files::set_override_dir(Some(p.into()));
             }
             i += 1;
+        } else if l == "--headless" {
+            // optional WxH after it
+            match args.get(i + 1).and_then(|v| parse_size(v)) {
+                Some(sz) => {
+                    opts.headless = Some(sz);
+                    i += 1;
+                }
+                None => opts.headless = Some(HEADLESS_SIZE),
+            }
         } else if l == "--race" || l == "--demo" {
             let t = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(1usize).clamp(1, 6);
             opts.race = Some((t, l == "--demo"));
@@ -546,11 +618,12 @@ fn main() {
             i += 1;
         } else if l == "-h" || l == "--help" {
             println!("usage: c8h18 [--asset <dir|file.c8pak>] [-s|--silent] [--no-intro] [--lang <code>] [--speed <25..400>]");
-            println!("             [--race <1..6> | --demo <1..6>] [--level <file>] [--sim <track> <ticks>]");
+            println!("             [--race <1..6> | --demo <1..6>] [--level <file>] [--sim <track> <ticks>] [--headless [WxH]]");
             println!("  --asset   the asset package: a directory with the original layout (DATA/, MAPS/, OBJECTS/, SOUND/,");
             println!("            lang/) or a .c8pak bundle of one; also `--data <path>` or a bare <path>. Without it:");
             println!("            $C8H18_ASSET or $GAME_DATA, then `package = <name>` in {},", data::locate::Env::system().settings_path().display());
             println!("            then the shipped {}", data::locate::SHIPPED_PACKAGE);
+            println!("  --headless  no window: run the C8H18_AUTO script at 60 frames/s offscreen (default 1920x1080)");
             return;
         } else if !l.starts_with('-') {
             asset = Some(a.into());
@@ -563,8 +636,29 @@ fn main() {
         race::headless(t, n, rings, true);
         return;
     }
+    if let Some(size) = opts.headless {
+        if let Err(e) = run_headless(&opts, size) {
+            eprintln!("headless: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let el = EventLoop::new().expect("event loop");
     el.set_control_flow(ControlFlow::Poll);
     let mut app = App { opts, game: None };
     el.run_app(&mut app).expect("run");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_size;
+
+    #[test]
+    fn headless_size() {
+        assert_eq!(parse_size("1920x1080"), Some((1920, 1080)));
+        assert_eq!(parse_size("640X360"), Some((640, 360)));
+        assert_eq!(parse_size("1920"), None);
+        assert_eq!(parse_size("0x100"), None);
+        assert_eq!(parse_size("--demo"), None);
+    }
 }

@@ -133,8 +133,11 @@ struct Globals {
 }
 
 pub struct Gfx {
-    pub window: Arc<Window>,
-    surface: wgpu::Surface<'static>,
+    /// None in headless capture mode (no window, no surface)
+    pub window: Option<Arc<Window>>,
+    surface: Option<wgpu::Surface<'static>>,
+    /// headless: the reused offscreen target every frame is drawn into
+    offscreen: Option<wgpu::Texture>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
@@ -231,6 +234,31 @@ impl Gfx {
             config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
         surface.configure(&device, &config);
+        Self::build(device, queue, config, Some(window), Some(surface))
+    }
+
+    /// Headless capture mode: a GPU device without a window or surface; every frame is drawn
+    /// into an offscreen texture of `w` x `h` (and submitted), `shot` reads it back.
+    pub async fn new_headless(w: u32, h: u32) -> Result<Gfx, String> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+                apply_limit_buckets: false,
+            })
+            .await
+            .map_err(|e| format!("no GPU adapter: {e}"))?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor { label: None, ..Default::default() })
+            .await
+            .map_err(|e| format!("no GPU device: {e}"))?;
+        let config = headless_config(w, h);
+        Ok(Self::build(device, queue, config, None, None))
+    }
+
+    fn build(device: wgpu::Device, queue: wgpu::Queue, config: wgpu::SurfaceConfiguration, window: Option<Arc<Window>>, surface: Option<wgpu::Surface<'static>>) -> Gfx {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("shader"),
@@ -453,6 +481,7 @@ impl Gfx {
         let mut g = Gfx {
             window,
             surface,
+            offscreen: None,
             device,
             queue,
             config,
@@ -564,7 +593,10 @@ impl Gfx {
         }
         self.config.width = w;
         self.config.height = h;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(s) = &self.surface {
+            s.configure(&self.device, &self.config);
+        }
+        self.offscreen = None;
         use wgpu::TextureUsages as TU;
         self.scene_tex = tex2d(&self.device, w, h, 1, SCENE_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
         self.depth_tex = tex2d(&self.device, w, h, 1, DEPTH_FMT, TU::RENDER_ATTACHMENT | TU::TEXTURE_BINDING);
@@ -779,15 +811,20 @@ impl Gfx {
         // nothing queued: queued writes live in staging memory until the next submit, so
         // queuing them every frame without submitting leaks (wired) GPU memory.
         // A pending screenshot is still taken: the frame is drawn into an offscreen texture.
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                None
-            }
-            _ => None,
+        // Headless (no surface): every frame is drawn offscreen and submitted.
+        let frame = match &self.surface {
+            None => None,
+            Some(surface) => match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(t),
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    surface.configure(&self.device, &self.config);
+                    None
+                }
+                _ => None,
+            },
         };
-        if frame.is_none() && self.shot.is_none() {
+        let headless = self.surface.is_none();
+        if frame.is_none() && self.shot.is_none() && !headless {
             return false;
         }
         self.upload_canvas(bg, fg);
@@ -842,9 +879,8 @@ impl Gfx {
             self.queue.write_buffer(&self.dyn_buf, 0, bytemuck::cast_slice(&dyn_verts));
         }
 
-        let target = match &frame {
-            Some(f) => f.texture.clone(),
-            None => self.device.create_texture(&wgpu::TextureDescriptor {
+        let mk_offscreen = || {
+            self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("offscreen shot"),
                 size: wgpu::Extent3d { width: self.config.width, height: self.config.height, depth_or_array_layers: 1 },
                 mip_level_count: 1,
@@ -853,7 +889,12 @@ impl Gfx {
                 format: self.config.format,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
-            }),
+            })
+        };
+        let target = match &frame {
+            Some(f) => f.texture.clone(),
+            None if headless => self.offscreen.get_or_insert_with(mk_offscreen).clone(),
+            None => mk_offscreen(),
         };
         let out_view = target.create_view(&Default::default());
         let scene_view = self.scene_tex.create_view(&Default::default());
@@ -984,6 +1025,11 @@ impl Gfx {
             readback = Some((buf, bpr));
         }
         self.queue.submit([enc.finish()]);
+        if headless {
+            // no vsync to pace the loop: wait for the GPU so frames (and their staging memory)
+            // never pile up
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        }
         if let (Some(path), Some((buf, bpr))) = (shot, readback) {
             buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
             let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
@@ -1007,10 +1053,27 @@ impl Gfx {
             }
         }
         if let Some(frame) = frame {
-            self.window.pre_present_notify();
+            if let Some(w) = &self.window {
+                w.pre_present_notify();
+            }
             self.queue.present(frame);
         }
         true
+    }
+}
+
+/// The render target settings of headless mode: what a surface would be configured with.
+fn headless_config(w: u32, h: u32) -> wgpu::SurfaceConfiguration {
+    wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        width: w.max(1),
+        height: h.max(1),
+        present_mode: wgpu::PresentMode::Fifo,
+        desired_maximum_frame_latency: 2,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        color_space: wgpu::SurfaceColorSpace::Auto,
+        view_formats: Vec::new(),
     }
 }
 

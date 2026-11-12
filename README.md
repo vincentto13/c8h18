@@ -702,5 +702,12 @@ The app icon, `packaging/macos/AppIcon.icns`, is drawn by the local generator `a
 `key:<Key>`, `hold:<Key>`, `release:<Key>`, `padhold:<Button>`, `padrelease:<Button>` (buttons: Up,
 Down, Left, Right, A, B, X, Y, LB, RB, LT, RT, Start, Back) and `quit`; `frame` counts display frames. Used for
 screenshot tests. A `shot` is also taken when the window has no drawable surface (hidden, display asleep or
-locked): that frame is drawn offscreen. Frames then run unthrottled, so space the frame numbers widely. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
+locked): that frame is drawn offscreen. Frames then run unthrottled, so space the frame numbers widely.
+`--headless [WxH]` (default 1920x1080) runs the same script with no window or surface at all, for shells that
+can't reach the window server: the game advances a fixed 1/60 s per frame, every frame is drawn into an
+offscreen texture, and it stops at `quit` or after the script's last op. Races are deterministic then, so the
+same script gives the same frames. Example:
+`C8H18_SAVE_DIR=$(mktemp -d) C8H18_AUTO="300:key:2;300:key:F8;900:shot:/tmp/a.png;901:quit" c8h18 --asset assets/custom -s --no-intro --race 1 --headless`.
+Note that any key ends a demo race (`--demo`), and the demo and autopilot cameras ignore F1..F10; for chase
+views use `--race N` and follow a computer craft with 2..8. In the editor, `HIEDIT_SHOT=<png path>` saves a screenshot of the window after
 30 frames and quits; `HIEDIT_TOOL=height|texture|light|select|objects|blocks` starts with that tool, `HIEDIT_ENTITY=<record>` / `HIEDIT_COLUMN=<id>` with that entity / column selected, `HIEDIT_VIEW=3d|split` with the 3D preview. `HIEDIT_SHOT_FRAMES=<n>` takes the screenshot after n frames; `HIEDIT_MCP_TOKEN` / `HIEDIT_MCP_PORT` fix the live MCP token and port (and keep the endpoint on with `HIEDIT_SHOT`), `HIEDIT_MCP_PANEL=1` opens the MCP panel.
