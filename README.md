@@ -550,7 +550,10 @@ c8h18-edit --xmi-to-midi TGAME1.XMI tune.mid               # for MuseScore, LMMS
 
 `assets/custom` holds a new track 1 made from scratch (`MAPS/LEVEL0-1.DAT`): a clockwise canyon
 circuit with a start grid, a banked sweeper, a crest, a chicane, a dip, a hairpin and a pit straight,
-with checkpoints, computer-driver waypoints, charger pads, collectables and props. It passes the
+with checkpoints, computer-driver waypoints, charger pads, collectables and props, lined with
+buildings made of block columns (pit garages, grandstands, race control, workshops, offices, a fuel
+depot, houses, floodlight masts), a start gantry and barriers on the outside of the bends. The road is 7.5 to 10 cells wide, its
+outline follows the curves on transition tiles instead of stepping cell by cell. It passes the
 editor's checks and the computer drivers complete laps. The package also holds its minimaps
 (`DATA/TRACK0-0/1`) and its carousel model (`OBJECTS/DATA/TRACK0-0.DAT`). It races on our own
 terrain textures and colour table (see below). It is written by a local generator, `mapgen/` (not
@@ -560,10 +563,12 @@ in git; see its README).
 
 `assets/custom/DATA/TEXTU0-0.DAT` holds track 1's 256 terrain textures, generated procedurally from
 scratch: sandy desert ground with gravel, clay and scrub patches (and transition tiles between
-them), sand verges, sandstone banks with strata, asphalt with yellow edge lines, the chequered
+them), sand verges, sandstone banks with strata, asphalt with yellow edge lines, transition tiles
+from road to sand (straight and diagonal borders at sixth-cell steps) and from sand to the banks, the chequered
 start/finish line and grid boxes, charger pads in the HUD minimap's colours, corner chevrons,
 barrier and billboard faces (with an invented brand), and a general set for levels made in the
-editor (rock, sand, concrete, metal, grates, walls, stripes, signs, road markings, water). Track 1's
+editor (rock, sand, concrete, metal, grates, walls, stripes, signs, road markings, water), whose
+walls, windows, doors and roofs also face track 1's buildings. Track 1's
 colour table `DATA/TABLE0-0.DAT` takes its flat colours (TEXTURE MAPPING off) from them. They are
 written by a local generator, `terraingen/` (not in git; see its README, which lists the ids).
 
