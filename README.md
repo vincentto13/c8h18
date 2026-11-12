@@ -502,10 +502,27 @@ format (16-bit 44.1 kHz in slot 0), in every slot of the bank at once with "Repl
 
 ### Music
 
-`assets/custom/SOUND` holds new music composed from scratch, as FM tunes like the original's:
-`MUSIC.DAT` (the five tunes in the FM slot) and `SAMPLE.OPL` / `SAMPLE.AD` (our own two-operator
-timbre bank, with a timbre for every General MIDI program and a percussion bank). The tunes are written by a local generator, `musicgen/`
-(not in git; see its README).
+`assets/custom/SOUND` holds new music composed and synthesised from scratch in a hard,
+high-tech style: driving techno and industrial at 128–150 BPM with four-on-the-floor kicks,
+distorted bass, acid lines, metal percussion, gated pads and distorted power-chord synth guitars,
+in dark minor and phrygian keys. Every tune the game plays is an OGG Vorbis recording (44.1 kHz
+stereo, loop points tagged, loudness matched) in `SOUND/MUSIC/`:
+
+| File | Plays | Style |
+|---|---|---|
+| `TGAME1.OGG` | race, tracks 1–2 | acid techno, E phrygian, 138.5 BPM, 3:00 |
+| `TGAME2.OGG` | race, tracks 3–4 | industrial techno, A phrygian, 150 BPM, 2:46 |
+| `TGAME4.OGG` | race, tracks 5–6 | techno metal, D minor, 150 BPM, 2:46 |
+| `TINTRO2.OGG` | intro movie | dark industrial, C phrygian, 128.6 BPM, 2:07 |
+
+The same compositions are also in `MUSIC.DAT` as FM tunes (the five tunes in the FM slot, TGAME3
+included, which the game never plays), with `SAMPLE.OPL` / `SAMPLE.AD` (our own two-operator timbre
+bank, with a timbre for every General MIDI program and a percussion bank), so the package still has
+music when the OGGs are removed. The front end plays no music, as in the original. `assets/custom`
+has only tracks 1 and 2 and no intro movie, so on its own it plays TGAME1; the other tunes are
+heard when its `SOUND` folder is used with a package that has tracks 3–6 and the intro. Everything is
+written by a local generator, `musicgen/` (not in git; see its README), with its own synthesisers:
+no samples, sound fonts or loops from anywhere else.
 
 **OGG replacements.** Any tune can be replaced by a recording: put an OGG Vorbis file named after
 the tune in `SOUND/MUSIC/` of the asset package (folder or bundle):
