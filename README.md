@@ -161,7 +161,7 @@ the idle timeout shows only the high-score table, and an error is logged (`no co
 asset package: track selection and races are disabled`). The minimap pictures in the shared
 `DATA/TRACK0-1.DAT/.TAB` stay optional (entries 1–2, 3–5, 6, 7–8, 9–10, 11 for tracks 1..6; nothing
 is drawn for missing entries). Track names, lap counts and the music tune are built in by track
-number. `assets/custom/` has a complete track 1 only, so it offers track 1.
+number. `assets/custom/` has complete tracks 1 and 2, so it offers those two.
 
 The debug paths `--race N`, `--demo N` and `--sim N` (also with `--level <file>`) load the track
 they are given even when it is incomplete; there the textures, sky and colour table fall back as in the table above, with their
@@ -558,6 +558,26 @@ editor's checks and the computer drivers complete laps. The package also holds i
 (`DATA/TRACK0-0/1`) and its carousel model (`OBJECTS/DATA/TRACK0-0.DAT`). It races on our own
 terrain textures and colour table (see below). It is written by a local generator, `mapgen/` (not
 in git; see its README).
+
+Track 2 (`MAPS/LEVEL0-2.DAT`) is an industrial circuit: a long start straight under an overpass, a
+tight right onto a top straight under pipe bridges, a conveyor and a gantry crane, a tight chicane,
+a raised causeway (the road climbs about five levels onto an embankment with armco and back) with a
+second fuel pad, a tight hairpin, a tank farm, two sharp 90-degree left-handers around buildings
+with an overpass between them, a pit lane with the charger pads and a bottom straight over a crest
+under a conveyor and a second gantry crane, and a sharp right round a factory onto the start
+straight. It runs through yards lined with warehouses, factory halls, offices, garages, storage
+tanks, silos, chimney stacks, container stacks with gantry cranes and railway sidings, with crash
+barriers and tyre walls on the tight corners. Crafts drive under the bridges. The level format can
+hold floating blocks, and the game drives crafts on top of blocks. But walls, checkpoints and
+waypoints are flat 2D shapes, so a road that crosses itself is not possible. The two overpasses are
+road decks between the yards with the race passing underneath. Track 2 has its own texture set
+`DATA/TEXTU0-1.DAT` (the same ids as track 1's, with concrete yards, black cinder verges, oily
+gravel, rust-stained dirt, weeds, concrete retaining banks, oil stains, hatches, drains, rail tracks
+and its own billboards and gantry adverts for invented industrial brands), colour table
+`DATA/TABLE0-1.DAT` (with a smoggy warm grey haze), sky `DATA/SKY0-1.PNG/.TXT/.DAT` (a smoggy dusk
+with a low red-orange sun in the west-north-west), carousel model `OBJECTS/DATA/TRACK0-1.DAT` and
+minimap entries (`DATA/TRACK0-1` entries 3–5, `DATA/TRACK0-0` entry 2). The same local generators
+make it (`mapgen --track 2`, `terraingen --set 1`, `skygen --sky 1`).
 
 ### Terrain textures
 

@@ -230,12 +230,12 @@ mod tests {
     }
 
     #[test]
-    fn custom_set_offers_track_one() {
+    fn custom_set_offers_tracks_one_and_two() {
         let c = repo("assets/custom");
         if !c.join("MAPS").is_dir() {
             return;
         }
-        assert_eq!(found(&c), vec![0]);
+        assert_eq!(found(&c), vec![0, 1]);
     }
 
     #[test]
