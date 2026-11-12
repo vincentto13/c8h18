@@ -684,7 +684,7 @@ impl World {
     pub fn chargers(&mut self) {
         for c in self.crafts.iter_mut().filter(|c| c.active) {
             for r in &self.track.chargers {
-                if r.contains_cell(c.pos[0], c.pos[1]) {
+                if r.contains_cell(c.pos[0], c.pos[1]) && super::track::in_range(r.range, c.pos[2]) {
                     let k = match r.kind {
                         1 => 0,
                         2 => 1,

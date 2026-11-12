@@ -94,16 +94,22 @@ pub(super) fn check(l: &Level) -> Vec<Issue> {
         out.push(Issue { error: true, text: format!("{} {} has no source area (link)", super::edit::entity_name(e), e.index), at: at_e(e), sel: Some(Sel::Entity(e.index)) });
     }
 
-    // waypoints, as the game builds them: positions joined by the first link from each
-    let mut child: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
-    let mut points: HashMap<(i32, i32), usize> = HashMap::new();
+    // waypoints, as the game builds them: positions joined by the first link from each (port
+    // addition: a waypoint is a position and a level, so the two branches of a crossing stay apart)
+    type Wp = (i32, i32, Option<u32>);
+    let wp = |e: &c8_data::level::Entity| -> Wp { (e.x, e.y, e.level.map(f32::to_bits)) };
+    let mut child: HashMap<Wp, Wp> = HashMap::new();
+    let mut points: HashMap<Wp, usize> = HashMap::new();
     for e in l.entities.iter().filter(|e| e.kind == 9 && e.sub != 0 && e.link != 0) {
         let Some(n) = by_index.get(&(e.link as usize)) else { continue };
-        points.entry((e.x, e.y)).or_insert(e.index);
-        points.entry((n.x, n.y)).or_insert(n.index);
-        if (e.x, e.y) != (n.x, n.y) {
-            child.entry((e.x, e.y)).or_insert((n.x, n.y));
+        points.entry(wp(e)).or_insert(e.index);
+        points.entry(wp(n)).or_insert(n.index);
+        if wp(e) != wp(n) {
+            child.entry(wp(e)).or_insert(wp(n));
         }
+    }
+    if l.has_addition() {
+        crossing_checks(l, &points, &mut out);
     }
     if points.is_empty() {
         out.push(issue(true, "no waypoints: computer players cannot drive".into()));
@@ -112,7 +118,7 @@ pub(super) fn check(l: &Level) -> Vec<Issue> {
             out.push(issue(true, format!("{} waypoint positions; the game keeps only the first 200", points.len())));
         }
         let mut ends: Vec<_> = points.iter().filter(|(p, _)| !child.contains_key(p)).collect();
-        ends.sort();
+        ends.sort_by_key(|(p, _)| (p.0, p.1, p.2));
         for (p, &i) in ends {
             out.push(Issue { error: false, text: format!("waypoint at {}, {} leads nowhere: computer players stop there", p.0, p.1), at: Some((p.0 as f32 + 0.5, p.1 as f32 + 0.5)), sel: Some(Sel::Entity(i)) });
         }
@@ -167,6 +173,37 @@ pub(super) fn check(l: &Level) -> Vec<Issue> {
     }
     out.sort_by_key(|i| !i.error);
     out
+}
+
+/// Port addition: checks of a level with crossings (sidecar data, spec 01 §9.7).
+fn crossing_checks(l: &Level, points: &HashMap<(i32, i32, Option<u32>), usize>, out: &mut Vec<Issue>) {
+    // a waypoint on or under a deck (blocks floating at least 0.4 above the terrain) needs a level,
+    // which says whether the route runs on the deck or under it
+    let mut under: Vec<usize> = points
+        .iter()
+        .filter(|(p, _)| p.2.is_none())
+        .filter(|(p, _)| {
+            let (x, y) = (p.0 as f32 + 0.5, p.1 as f32 + 0.5);
+            l.ceiling_above(x, y, l.terrain_height(x, y) + 0.05).is_some_and(|c| c - l.terrain_height(x, y) >= 0.4)
+        })
+        .map(|(_, &i)| i)
+        .collect();
+    under.sort();
+    for i in under {
+        let e = l.entities.iter().find(|e| e.index == i).unwrap();
+        out.push(Issue { error: false, text: format!("waypoint {i} is on or under a deck but has no level (the deck's top or the road's height under it)"), at: Some((e.x as f32 + 0.5, e.y as f32 + 0.5)), sel: Some(Sel::Entity(i)) });
+    }
+    // flat bases without a column do nothing
+    let n = l.cells.iter().filter(|c| c.base.is_some() && c.tex >= 0).count();
+    if n > 0 {
+        out.push(issue(false, format!("{n} cells have a flat block base but no column")));
+    }
+    // a wall with a height range on its last point (no segment starts there)
+    for e in l.entities.iter().filter(|e| e.kind == 9 && e.sub == 0 && e.link == 0 && e.range.is_some()) {
+        if !l.entities.iter().any(|o| o.kind == 9 && o.sub == 0 && o.link as usize == e.index && o.range.is_some()) {
+            out.push(Issue { error: false, text: format!("wall point {} has a height range but starts no segment, and the segment ending there has none", e.index), at: Some((e.x as f32 + 0.5, e.y as f32 + 0.5)), sel: Some(Sel::Entity(e.index)) });
+        }
+    }
 }
 
 // ---- AI test ----------------------------------------------------------------------------------
@@ -227,6 +264,7 @@ fn parse_sim(out: &str) -> AiReport {
 
 impl LevelDoc {
     pub(super) fn start_ai_test(&mut self) {
+        let side = super::sidecar_bytes(&self.level);
         let bytes = match self.level.to_bytes() {
             Ok(b) => b,
             Err(e) => {
@@ -242,6 +280,7 @@ impl LevelDoc {
                 let dir = std::env::temp_dir().join(format!("c8h18-edit-sim-{}", std::process::id()));
                 std::fs::create_dir_all(dir.join("MAPS")).map_err(|e| e.to_string())?;
                 std::fs::write(dir.join(format!("MAPS/LEVEL0-{track}.DAT")), bytes).map_err(|e| e.to_string())?;
+                std::fs::write(dir.join(format!("MAPS/LEVEL0-{track}.TXT")), side).map_err(|e| e.to_string())?;
                 let data = c8_data::files::data_dir();
                 let data = data.canonicalize().unwrap_or(data);
                 let exe = crate::launch::game_exe();
@@ -391,6 +430,23 @@ mod tests {
         assert!(l.to_bytes().expect("write") == raw, "assets/custom level differs after a round trip");
         let issues: Vec<String> = check(&l).into_iter().map(|i| format!("{}: {}", if i.error { "error" } else { "warning" }, i.text)).collect();
         assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    /// A valid crossing (port addition) gives no errors and no crossing warnings: the two
+    /// waypoints that share a cell on two levels are not merged.
+    #[test]
+    fn crossing_example_is_clean() {
+        let l = c8_data::level::crossing_example();
+        let issues: Vec<String> = check(&l).into_iter().map(|i| format!("{}: {}", if i.error { "error" } else { "warning" }, i.text)).collect();
+        let bad: Vec<&String> = issues.iter().filter(|i| i.starts_with("error") || ["leads nowhere", "deck", "flat block base", "height range"].iter().any(|w| i.contains(w))).collect();
+        assert!(bad.is_empty(), "{issues:?}");
+        // without the levels, the waypoints on and under the deck are reported
+        let mut l = l;
+        for e in l.entities.iter_mut().filter(|e| e.kind == 9 && e.sub != 0) {
+            e.level = None;
+        }
+        let issues: Vec<String> = check(&l).into_iter().map(|i| i.text).collect();
+        assert!(issues.iter().any(|i| i.contains("on or under a deck")), "{issues:?}");
     }
 
     #[test]

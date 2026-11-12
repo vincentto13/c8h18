@@ -449,6 +449,82 @@ The original's way of picking the 8 grid positions inside the start area was not
 After loading, the game scans all cells and stores at 358198 / 358200 the largest x and y of cells whose texture has
 bit 2 set, each plus 1, and at 358202 / 358204 the values `318 − maxX` and `198 − maxY` (minimap placement).
 
+### 9.7 Crossings — `MAPS/LEVEL0-N.TXT` (port addition)
+
+Not part of the original set. An optional sidecar next to the level adds what a road that crosses over
+itself needs: one branch on a deck of block columns, the other branch under it, both raced in the same
+lap. The `.DAT` is not changed by it (the original-format reader and the editor's byte-identical round trip
+are unaffected), and a level without a sidecar behaves exactly as before. For a level file at any path
+(`--level`, the editor) the sidecar is the file with the same name and the extension `.TXT` in the same
+folder (any letter case).
+
+UTF-8 text, one record per line, words separated by spaces, `#` starts a comment, keywords in any letter
+case. Heights are in cells (the terrain's unit: corner height / 256), decimals allowed; `inf` and `-inf`
+are allowed in ranges. A malformed line, an unknown keyword, an entity or region record that does not
+exist or an empty range makes the level fail to load with the line number
+(`MAPS/LEVEL0-1.TXT: line 3: no entity record 3999`).
+
+| Record | Meaning |
+|---|---|
+| `base X Y H` or `base X0 Y0 X1 Y1 H` | the cell, or the rectangle of cells X0..X1 × Y0..Y1 (inclusive), has a **flat block base**: the blocks of its column span heights `H + k .. H + k + 1` instead of `k .. k + 1` above the cell's interpolated terrain (section 9.2). H is stored as 8.8 (0 .. 255.99). Without a column the record has no effect |
+| `level R H` | entity record R stands on the **highest surface at or below height H** (a block top or the terrain) instead of the highest surface of its cell. For waypoint points (type 9, sub-type ≠ 0) it is the route's level there; for created things (types 2, 3, 5, 10) where they are placed |
+| `range R LO HI` | entity record R counts only for crafts whose height (the craft's position, its hover point about 0.39 above the surface it drives on) is within LO .. HI: a **wall segment** (set on the segment's first point, the one whose link starts it) stops only those crafts; a **checkpoint** is passed only by them |
+| `region S LO HI` | region record S (section 9.5; a charger) works only for crafts at heights LO .. HI |
+
+A level that has any of these records is **layered**, and the race then also (only then):
+
+- puts the crafts' waypoint targets, the autopilot of finished crafts, a craft without a waypoint and the
+  craft put back without a truck on route points of the craft's own level: a route stretch counts only
+  when the craft's height is within 0.6 below and 1.6 above the surface of its waypoints (chapter 07);
+  a waypoint is only reached on that level, and a waypoint is a position *and* a level, so the two
+  branches may share cells;
+- lets a truck drop a craft at the first point from its route position on that is open to the sky
+  (no block above it), on the same branch;
+- ignores the terrain's slope (the momentum slope of chapter 05 §3.e and the sensors' steep-slope stop of
+  §3.i) for a craft or sensor standing on a block top, since the terrain under a deck's ends is steep;
+- holds a craft under a block at least 0.25 below the block's underside (and its sensors), so it can
+  never be lifted into a deck and onto it;
+- draws shadows on the surface right below the model (a deck or the road under it) instead of the
+  terrain (chapter 08 §10), and keeps the chase camera's eye below a deck that is above the craft and
+  short of the first block between the craft and the eye (chapter 08 §3.4).
+
+**How to build a crossing** (the example level `c8_data::level::crossing_example` in the code follows
+these rules; the numbers below are its numbers):
+
+1. Lower road: flat terrain (height 0 here) through the crossing.
+2. Deck: block columns over the crossing and one or more **end rows** on each side where the upper road
+   leaves the lower road's corridor, all with the same `base` B and the same block levels, so the deck's
+   top is flat at `T = B + top level + 1`. The underside (B for level 0) must be **at least 1.0 above the
+   lower road** (a craft's sensors stop at blocks lower than about 0.4, its camera needs the rest), and
+   the top **at least 2.0 above it** (so the two levels are told apart). Example: B = 1, one level, top 2.
+3. Ramps: terrain on the upper road rising to T at the corner row where the deck's end rows begin.
+   Corner heights are shared by neighbouring cells, so the terrain under the end rows falls from T to
+   the lower road (here corner rows 35 = 2, 36 = 1, 37 = 0); the deck's flat base makes the block top
+   meet the ramp's top without a step. A ramp of 2 over 8 cells drives well; keep the ramp's sides
+   steep or walled.
+4. Walls: every wall segment that crosses the **other** road's corridor gets a range: the lower road's
+   walls `-inf .. 1.4`, the upper road's walls `1.4 .. inf` (split each wall chain so that only those
+   segments carry it). Other walls need none.
+5. Waypoints: give every waypoint on or under the deck a `level` (here 0.5 for the road under it, 2.5
+   for the deck); the editor's track check warns about one without. The route is one loop through both.
+6. Checkpoints over the crossing get a `range` (here `1.6 .. inf` on the deck), or lie away from it; the
+   order of the checkpoints along the lap must put the crossing's two passes in different sections.
+7. Things on or under the deck (pickups, scenery, trucks) get a `level`; chargers near the crossing a
+   `region` range. The start grid, triggers (type 8) and the trucks' flight height are not layered: keep
+   them away from decks.
+
+Example (part of the example level's sidecar):
+
+```
+base 57 35 62 44 1      # the deck and its end rows: blocks on the flat base 1
+range 2 -inf 1.4        # lower road wall segment over the upper road's corridor
+range 10 1.4 inf        # upper road wall segment over the lower road's corridor
+level 20 0.5            # waypoint under the deck
+level 31 2.5            # waypoint on the deck
+range 44 1.6 inf        # checkpoint on the deck
+level 46 0.5            # pickup under the deck
+```
+
 ## 10. Search-ring grid — `DATA/SRCH0-0.DAT`
 
 RNC, unpacked 1024 bytes = a 32 × 32 grid (row-major) describing rings of cells around a centre, used by the big

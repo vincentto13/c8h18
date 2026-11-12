@@ -647,6 +647,10 @@ function); the reference recreation exposes it as a port feature:
 - Tab shows a port-only top-down debug map.
 - Port addition: an optional true-colour sky with a sun and sun glare (§6.1), drawn instead of the
   palette sky when the track has `DATA/SKY0-N.PNG`; tracks without one are drawn as before.
+- Port addition, crossings (chapter 01 §9.7): blocks on a flat base are drawn with all corners at
+  that base (with the floor quad under them and a bottom face on level 0); on layered levels shadows
+  lie on the surface right below the model, and the chase eye stays below a deck above the craft and
+  short of the first block between craft and eye.
 
 ## Known gaps
 

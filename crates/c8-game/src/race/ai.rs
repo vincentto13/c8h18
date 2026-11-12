@@ -1,13 +1,14 @@
 //! Computer drivers (spec 07) and the recovery trucks (spec 05 §8).
 use super::math::*;
 use super::sim::*;
+use super::track::{in_range, on_level};
 
 impl World {
     pub fn autopilot(&mut self, c: &mut Craft, i: usize) {
         // 1 first tick
         if !c.ap_first {
             c.ap_first = true;
-            c.waypoint = self.track.nearest(c.pos[0], c.pos[1]);
+            c.waypoint = self.track.nearest_at(c.pos[0], c.pos[1], c.pos[2]);
             return;
         }
         // 2 stuck check
@@ -27,7 +28,7 @@ impl World {
         }
         // 3
         if c.waypoint == 0 {
-            c.waypoint = self.track.absolute_nearest(c.pos[0], c.pos[1]);
+            c.waypoint = self.lost_waypoint(c);
             if c.waypoint == 0 {
                 return;
             }
@@ -44,7 +45,8 @@ impl World {
             6.0
         };
         let w = self.track.wps[c.waypoint];
-        if len2([w.x - c.pos[0], w.y - c.pos[1]]) < dd {
+        // port addition: on a layered level the waypoint counts only when the craft is on its level
+        if len2([w.x - c.pos[0], w.y - c.pos[1]]) < dd && (!self.track.layered || on_level(c.pos[2], w.floor, w.floor)) {
             c.hold_fire = w.kind == 8;
             c.fire_at_will = w.kind == 9;
             if w.kind == 7 {
@@ -53,7 +55,7 @@ impl World {
             c.last_wp = c.waypoint;
             c.waypoint = w.child;
             if c.waypoint == 0 {
-                c.waypoint = self.track.absolute_nearest(c.pos[0], c.pos[1]);
+                c.waypoint = self.lost_waypoint(c);
             }
             if c.wants[0] {
                 c.waypoint = self.track.junction(c.waypoint, 2);
@@ -95,7 +97,7 @@ impl World {
             None
         };
         if let Some(k) = want_pad {
-            if self.track.chargers.iter().any(|r| r.kind == k && r.contains_cell(c.pos[0], c.pos[1])) {
+            if self.track.chargers.iter().any(|r| r.kind == k && r.contains_cell(c.pos[0], c.pos[1]) && in_range(r.range, c.pos[2])) {
                 c.speed_in = -26.0;
                 c.momentum[0] *= 15.0 / 16.0;
                 c.momentum[1] *= 15.0 / 16.0;
@@ -188,30 +190,61 @@ impl World {
         t.pos[2] += (g + 6.0 - t.pos[2]).clamp(-30.0 * U, 40.0 * U);
     }
 
-    fn drop_waypoint(&self, c: &Craft) -> usize {
+    /// A craft without a waypoint: the nearest one (port addition: on its level, layered levels).
+    fn lost_waypoint(&self, c: &Craft) -> usize {
+        if self.track.layered { self.track.nearest_at(c.pos[0], c.pos[1], c.pos[2]) } else { self.track.absolute_nearest(c.pos[0], c.pos[1]) }
+    }
+
+    pub(crate) fn drop_waypoint(&self, c: &Craft) -> usize {
         let tr = &self.track;
         let mut best = (f32::MAX, 0usize);
         if !tr.checkpoints.is_empty() {
             let last = tr.checkpoints[c.last_cp.min(tr.checkpoints.len() - 1)];
             let next = tr.checkpoints[tr.next_checkpoint(c.last_cp.min(tr.checkpoints.len() - 1))];
-            if let Some(mut w) = (1..tr.wps.len()).find(|&k| last.contains(tr.wps[k].x, tr.wps[k].y)) {
+            // port addition: on a layered level, route points on the craft's level and inside the
+            // checkpoints' height ranges
+            let on = |k: usize| !tr.layered || on_level(c.pos[2], tr.wps[k].floor, tr.wps[k].floor);
+            let in_cp = |cp: &super::track::Checkpoint, p: &super::track::Waypoint| cp.contains(p.x, p.y) && (!tr.layered || in_range(cp.range, p.floor + super::track::HOVER));
+            if let Some(mut w) = (1..tr.wps.len()).find(|&k| in_cp(&last, &tr.wps[k])) {
                 for _ in 0..30 {
                     if w == 0 {
                         break;
                     }
                     let p = tr.wps[w];
                     let d = len2([p.x - c.pos[0], p.y - c.pos[1]]);
-                    if d < best.0 && p.child != 0 {
+                    if d < best.0 && p.child != 0 && on(w) {
                         best = (d, w);
                     }
-                    if next.contains(p.x, p.y) {
+                    if in_cp(&next, &p) {
                         break;
                     }
                     w = p.child;
                 }
             }
         }
-        if best.1 == 0 { tr.nearest(c.pos[0], c.pos[1]).max(1).min(tr.wps.len().saturating_sub(1)) } else { best.1 }
+        let mut wp = if best.1 == 0 {
+            let n = if tr.layered { tr.along_route(c.waypoint, c.pos[0], c.pos[1], c.pos[2]) } else { tr.nearest(c.pos[0], c.pos[1]) };
+            n.max(1).min(tr.wps.len().saturating_sub(1))
+        } else {
+            best.1
+        };
+        // port addition: the truck can't lower a craft through a deck; drop it at the next route
+        // point that is open to the sky (on the same branch)
+        if tr.layered {
+            let mut k = wp;
+            for _ in 0..12 {
+                let p = tr.wps[k];
+                if self.lvl.ceiling_above(p.x, p.y, p.floor + 0.1).is_none() {
+                    wp = k;
+                    break;
+                }
+                if p.child == 0 {
+                    break;
+                }
+                k = p.child;
+            }
+        }
+        wp
     }
 
     pub fn update_trucks(&mut self) {

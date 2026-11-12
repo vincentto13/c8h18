@@ -192,6 +192,28 @@ impl RaceCamera {
             row += a[1];
             h += a[2];
         }
+        if w.track.layered && self.distance > 0.0 {
+            // port addition, layered levels: the eye stays on the craft's side of a deck: below the
+            // underside of a deck above the craft's level (no clipping through it from below)...
+            let (cx, cy) = (x.clamp(0.0, 255.9), row.clamp(0.0, 159.9));
+            if let Some(top) = w.lvl.ceiling_above(cx, cy, self.height - 0.3) {
+                let floor = w.lvl.surface_below(cx, cy, self.height);
+                h = h.min((top - 0.12).max(floor + 0.1));
+            }
+            // ...and short of the first block between the craft and the eye
+            let p0 = [self.x, self.row, self.height];
+            let n = ((dist3(p0, [x, row, h]) * 16.0).ceil() as i32).max(1);
+            let mut last = p0;
+            for k in 1..=n {
+                let f = k as f32 / n as f32;
+                let q = [p0[0] + (x - p0[0]) * f, p0[1] + (row - p0[1]) * f, p0[2] + (h - p0[2]) * f];
+                if w.lvl.solid_at(q[0], q[1], q[2]) {
+                    break;
+                }
+                last = q;
+            }
+            (x, row, h) = (last[0], last[1], last[2]);
+        }
         let t = w.lvl.terrain_height(x.clamp(0.0, 255.9), row.clamp(0.0, 159.9));
         h = h.max(t + 128.0 * U);
         Camera { x, row, height: h, yaw: self.yaw, pitch: self.pitch, roll: self.roll, focal320: 94.0, fixed_43: false }

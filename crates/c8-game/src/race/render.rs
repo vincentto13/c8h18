@@ -91,7 +91,7 @@ impl<'a> SceneBuilder<'a> {
     }
 
     /// `shadow`: the terrain height under the model (spec 08 §10: the shadow lies on the ground
-    /// point, columns ignored), or None for no shadow.
+    /// point, columns ignored; on layered levels the surface below the model), or None for no shadow.
     pub fn model(&mut self, m: usize, pos: [f32; 3], yaw: f32, pitch: f32, roll: f32, shadow: Option<f32>, flicker: u32) {
         if !self.in_range(pos) {
             return;
@@ -169,7 +169,9 @@ impl<'a> SceneBuilder<'a> {
 
 /// Add all things of the world to the scene.
 pub fn build_world(sb: &mut SceneBuilder, w: &World, ip: &Interp, hidden: Option<usize>) {
-    let gnd = |p: [f32; 3]| Some(w.lvl.terrain_height(p[0], p[1]));
+    // port addition, layered levels: the shadow lies on the surface right below the model (a deck
+    // or the road under it), not on the terrain under the blocks
+    let gnd = |p: [f32; 3]| Some(if w.track.layered { w.lvl.surface_below(p[0], p[1], p[2]) } else { w.lvl.terrain_height(p[0], p[1]) });
     for (i, c) in w.crafts.iter().enumerate() {
         if !c.active || c.invis > 0 || Some(i) == hidden {
             continue;

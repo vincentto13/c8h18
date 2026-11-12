@@ -7,6 +7,29 @@ pub struct Wall {
     pub a: [f32; 2],
     pub b: [f32; 2],
     pub dir: f32,
+    /// port addition: applies only to crafts at heights lo..=hi (None = all heights)
+    pub range: Option<(f32, f32)>,
+}
+impl Wall {
+    pub fn applies(&self, z: f32) -> bool {
+        in_range(self.range, z)
+    }
+}
+
+/// Port addition: is height z inside an optional height range (None = everywhere)?
+#[inline]
+pub fn in_range(r: Option<(f32, f32)>, z: f32) -> bool {
+    r.is_none_or(|(lo, hi)| z >= lo && z <= hi)
+}
+
+/// Port addition, layered levels: the crafts' hover height above the surface (spec 05 §3.l).
+pub const HOVER: f32 = 100.0 / 256.0;
+
+/// Port addition, layered levels: can a craft at height z be on a route stretch whose surface lies
+/// between heights f0 and f1? Two levels of a crossing are at least 2 cells apart.
+#[inline]
+pub fn on_level(z: f32, f0: f32, f1: f32) -> bool {
+    z >= f0.min(f1) - 0.6 && z <= f0.max(f1) + 1.6
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -14,8 +37,14 @@ pub struct Checkpoint {
     pub value: u16,
     pub min: [f32; 2],
     pub max: [f32; 2],
+    /// port addition: counts only crafts at heights lo..=hi
+    pub range: Option<(f32, f32)>,
 }
 impl Checkpoint {
+    /// Does the box hold a craft at (x, y, z)? (The height counts only with a range.)
+    pub fn holds(&self, x: f32, y: f32, z: f32) -> bool {
+        self.contains(x, y) && in_range(self.range, z)
+    }
     pub fn contains(&self, x: f32, y: f32) -> bool {
         x >= self.min[0] && x <= self.max[0] && y >= self.min[1] && y <= self.max[1]
     }
@@ -36,6 +65,8 @@ pub struct Waypoint {
     pub child: usize,
     pub peer: usize,
     pub floor: f32,
+    /// port addition: the height given to the waypoint's entity (the route's level there)
+    pub level: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,6 +74,8 @@ pub struct Rect {
     pub kind: u8,
     pub min: [f32; 2],
     pub max: [f32; 2],
+    /// port addition: works only for crafts at heights lo..=hi
+    pub range: Option<(f32, f32)>,
 }
 impl Rect {
     pub fn contains_cell(&self, x: f32, y: f32) -> bool {
@@ -59,6 +92,8 @@ pub struct Track {
     pub chargers: Vec<Rect>,
     pub start_cells: Vec<(i32, i32)>,
     pub start_heading: f32,
+    /// port addition: the level has sidecar data (crossings); height-aware lookups are used
+    pub layered: bool,
 }
 
 pub fn is_junction(kind: u8) -> bool {
@@ -74,7 +109,7 @@ impl Track {
             if let Some(n) = ent_by_index(e.link) {
                 let a = [e.x as f32 + 0.5, e.y as f32 + 0.5];
                 let b = [n.x as f32 + 0.5, n.y as f32 + 0.5];
-                walls.push(Wall { a, b, dir: heading(b[0] - a[0], b[1] - a[1]) });
+                walls.push(Wall { a, b, dir: heading(b[0] - a[0], b[1] - a[1]), range: e.range });
             }
         }
         // checkpoints
@@ -86,26 +121,28 @@ impl Track {
                 let corner = [e.x as f32 + 0.5, e.y as f32 + 0.5];
                 let hw = (e.w as f32 + 1.0) / 2.0;
                 let hh = (e.h as f32 + 1.0) / 2.0;
-                Checkpoint { value: e.value, min: corner, max: [corner[0] + 2.0 * hw, corner[1] + 2.0 * hh] }
+                Checkpoint { value: e.value, min: corner, max: [corner[0] + 2.0 * hw, corner[1] + 2.0 * hh], range: e.range }
             })
             .collect();
         checkpoints.sort_by_key(|c| c.value);
         // waypoints
         let mut wps = vec![Waypoint::default()];
-        let find_or_add = |wps: &mut Vec<Waypoint>, x: f32, y: f32, kind: u8| -> usize {
-            if let Some(i) = wps.iter().skip(1).position(|w| w.x == x && w.y == y) {
+        // port addition: a waypoint is a position and a level (two levels of a crossing can share a cell)
+        let find_or_add = |wps: &mut Vec<Waypoint>, e: &crate::data::level::Entity, kind: u8| -> usize {
+            let (x, y, level) = (e.x as f32 + 0.5, e.y as f32 + 0.5, e.level);
+            if let Some(i) = wps.iter().skip(1).position(|w| w.x == x && w.y == y && w.level == level) {
                 return i + 1;
             }
             if wps.len() >= 201 {
                 return 0;
             }
             let idx = wps.len();
-            wps.push(Waypoint { x, y, kind, child: 0, peer: idx, floor: lvl.floor_below(x, y, 255.0) });
+            wps.push(Waypoint { x, y, kind, child: 0, peer: idx, floor: lvl.entity_ground(e), level });
             // junction ring
             let mut j = 0;
             for k in 1..idx {
                 let w = wps[k];
-                if len2([w.x - x, w.y - y]) < 500.0 / 256.0 {
+                if len2([w.x - x, w.y - y]) < 500.0 / 256.0 && w.level == level {
                     // not yet in its ring
                     let mut in_ring = false;
                     let mut r = wps[idx].peer;
@@ -130,8 +167,8 @@ impl Track {
         };
         for e in lvl.entities.iter().filter(|e| e.kind == 9 && e.sub != 0 && e.link != 0) {
             let Some(n) = ent_by_index(e.link) else { continue };
-            let a = find_or_add(&mut wps, e.x as f32 + 0.5, e.y as f32 + 0.5, e.sub);
-            let b = find_or_add(&mut wps, n.x as f32 + 0.5, n.y as f32 + 0.5, e.sub);
+            let a = find_or_add(&mut wps, e, e.sub);
+            let b = find_or_add(&mut wps, n, e.sub);
             if a != 0 && b != 0 && wps[a].child == 0 && a != b {
                 wps[a].child = b;
             }
@@ -144,6 +181,7 @@ impl Track {
                 kind: r.kind,
                 min: [(r.cx - r.hw).max(0.0), (r.cy - r.hh).max(0.0)],
                 max: [(r.cx + r.hw).min(MAP_W as f32), (r.cy + r.hh).min(MAP_H as f32)],
+                range: r.range,
             };
             if r.kind == 4 {
                 start = Some(rect);
@@ -187,7 +225,7 @@ impl Track {
             let pb = -(b.0 as f32 * dir[0] + b.1 as f32 * dir[1]);
             pa.partial_cmp(&pb).unwrap().then((a.1, a.0).cmp(&(b.1, b.0)))
         });
-        Track { walls, checkpoints, wps, chargers, start_cells, start_heading }
+        Track { walls, checkpoints, wps, chargers, start_cells, start_heading, layered: lvl.has_addition() }
     }
 
     /// Next checkpoint after value v (value + 1, else smallest larger, else the line).
@@ -240,6 +278,99 @@ impl Track {
         }
         if best.1 == 0 { self.absolute_nearest(x, y) } else { best.1 }
     }
+    /// Port addition: [`nearest`](Self::nearest) for a craft at height z. On a layered level only
+    /// route stretches on the craft's level count (a crossing's other branch is never picked);
+    /// other levels behave exactly as before.
+    pub fn nearest_at(&self, x: f32, y: f32, z: f32) -> usize {
+        if !self.layered {
+            return self.nearest(x, y);
+        }
+        let mut best = (f32::MAX, 0);
+        for a in self.wps.iter().skip(1) {
+            if a.child == 0 {
+                continue;
+            }
+            let b = self.wps[a.child];
+            let l = len2([b.x - a.x, b.y - a.y]);
+            if l <= 0.0 || !on_level(z, a.floor, b.floor) {
+                continue;
+            }
+            let da = len2([a.x - x, a.y - y]);
+            let db = len2([b.x - x, b.y - y]);
+            if da < l && db < l {
+                let perp = ((b.x - a.x) * (a.y - y) - (a.x - x) * (b.y - a.y)).abs() / l;
+                if perp < best.0 {
+                    best = (perp, a.child);
+                }
+            }
+        }
+        if best.1 != 0 {
+            return best.1;
+        }
+        let mut best = (f32::MAX, 0);
+        for (i, w) in self.wps.iter().enumerate().skip(1) {
+            if w.child == 0 || !on_level(z, w.floor, w.floor) {
+                continue;
+            }
+            let d = len2([w.x - x, w.y - y]);
+            if d < best.0 {
+                best = (d, i);
+            }
+        }
+        if best.1 != 0 { best.1 } else { self.nearest(x, y) }
+    }
+
+    /// Port addition: the waypoint to aim at for a craft at (x, y, z) whose current target is `cur`,
+    /// following the route: the nearest waypoint on the craft's level among the few before and after
+    /// `cur` along the loop, else [`nearest_at`](Self::nearest_at). Only for layered levels;
+    /// otherwise it is [`nearest`](Self::nearest), as before.
+    pub fn along_route(&self, cur: usize, x: f32, y: f32, z: f32) -> usize {
+        if !self.layered {
+            return self.nearest(x, y);
+        }
+        if cur == 0 || cur >= self.wps.len() {
+            return self.nearest_at(x, y, z);
+        }
+        // a few back (the parents of cur), then cur and a few ahead
+        let mut cand = Vec::new();
+        let mut p = cur;
+        for _ in 0..3 {
+            match (1..self.wps.len()).find(|&k| self.wps[k].child == p) {
+                Some(q) => {
+                    cand.push(q);
+                    p = q;
+                }
+                None => break,
+            }
+        }
+        let mut n = cur;
+        for _ in 0..8 {
+            if n == 0 {
+                break;
+            }
+            cand.push(n);
+            n = self.wps[n].child;
+        }
+        let mut best = (f32::MAX, 0);
+        for &k in &cand {
+            let w = self.wps[k];
+            if w.child == 0 || !on_level(z, w.floor, w.floor) {
+                continue;
+            }
+            let d = len2([w.x - x, w.y - y]);
+            if d < best.0 {
+                best = (d, k);
+            }
+        }
+        if best.1 == 0 {
+            return self.nearest_at(x, y, z);
+        }
+        // aim at the next one when the craft is already past the nearest (as nearest() aims at a child)
+        let w = self.wps[best.1];
+        let c = self.wps[w.child];
+        if len2([c.x - x, c.y - y]) < len2([c.x - w.x, c.y - w.y]) { w.child } else { best.1 }
+    }
+
     pub fn junction(&self, p: usize, kind: u8) -> usize {
         if p == 0 {
             return 0;

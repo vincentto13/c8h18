@@ -203,6 +203,8 @@ pub struct LevelDoc {
     all_fields: bool,
     entity_filter: String,
     col_mode: ColMode,
+    /// port addition: the flat block base the Base mode paints (None = clear it)
+    base_value: Option<f32>,
     col_sel: Option<usize>,
     blk_sel: Option<usize>,
     /// face being given a texture: 0..5 block faces, 6 the column floor
@@ -279,6 +281,7 @@ impl LevelDoc {
             all_fields: false,
             entity_filter: String::new(),
             col_mode: ColMode::Select,
+            base_value: Some(0.0),
             col_sel: None,
             blk_sel: None,
             face_sel: 0,
@@ -568,6 +571,10 @@ impl LevelDoc {
                         let c = if tunnel { Color32::from_rgba_unmultiplied(80, 160, 255, 90) } else { Color32::from_rgba_unmultiplied(255, 120, 40, 40 + n.min(8) * 15) };
                         p.rect_filled(cell_rect(cx as f32, cy as f32, 1.0, 1.0), 0.0, c);
                     }
+                    // port addition: a flat block base (a deck): a violet frame
+                    if lvl.cell(cx, cy).base.is_some() && z >= 3.0 {
+                        p.rect_stroke(cell_rect(cx as f32 + 0.15, cy as f32 + 0.15, 0.7, 0.7), 0.0, Stroke::new(1.5, Color32::from_rgb(200, 120, 255)), egui::StrokeKind::Inside);
+                    }
                 }
             }
         }
@@ -807,7 +814,10 @@ impl Document for LevelDoc {
     }
     /// The level replaces the one of the track whose textures it is shown with.
     fn game_files(&self) -> Result<Vec<(String, Vec<u8>)>, String> {
-        Ok(vec![(format!("MAPS/LEVEL0-{}.DAT", self.look.set + 1), self.level.to_bytes()?)])
+        // the sidecar always goes along (a comment only without the addition), so that a sidecar in
+        // the package does not apply to this level
+        let n = self.look.set + 1;
+        Ok(vec![(format!("MAPS/LEVEL0-{n}.DAT"), self.level.to_bytes()?), (format!("MAPS/LEVEL0-{n}.TXT"), sidecar_bytes(&self.level))])
     }
     fn game_args(&self) -> Vec<String> {
         vec!["--no-intro".into(), "--race".into(), (self.look.set + 1).to_string()]
@@ -1047,7 +1057,7 @@ impl LevelDoc {
             ui.selectable_value(&mut self.base, Base::Height, "Height");
             ui.selectable_value(&mut self.base, Base::Light, "Light");
         });
-        ui.checkbox(&mut self.show_columns, "Block columns (blue = tunnel)");
+        ui.checkbox(&mut self.show_columns, "Block columns (blue = tunnel, violet frame = flat base)");
         ui.checkbox(&mut self.show_entities, "Entities, walls, waypoints");
         ui.checkbox(&mut self.show_regions, "Chargers and start area");
         ui.checkbox(&mut self.show_grid, "Grid (when zoomed in)");
@@ -1318,7 +1328,7 @@ mod tests {
         assert_eq!(d.entity(a).unwrap().link, b as u16);
         // a region and a column
         let slot = d.level.free_region_slot().unwrap();
-        d.edit("region", |l| l.regions.push(c8_data::level::Region { slot, kind: 2, cx: 50.5, cy: 50.5, hw: 1.5, hh: 1.5 }));
+        d.edit("region", |l| l.regions.push(c8_data::level::Region { slot, kind: 2, cx: 50.5, cy: 50.5, hw: 1.5, hh: 1.5, range: None }));
         d.new_column(None);
         let col = d.col_sel.unwrap();
         d.brush_radius = 0;
@@ -1361,4 +1371,9 @@ pub fn entity_reference() -> String {
         }
     }
     s
+}
+
+/// The level's sidecar (port addition, spec 01 §9.7) for the game: its addition, or a comment only.
+pub(super) fn sidecar_bytes(l: &Level) -> Vec<u8> {
+    l.addition_text().unwrap_or_else(|| "# no level addition\n".into()).into_bytes()
 }

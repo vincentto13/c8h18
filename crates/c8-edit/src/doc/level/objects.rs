@@ -227,7 +227,7 @@ impl LevelDoc {
                 if resp.clicked() {
                     match self.level.free_region_slot() {
                         Some(slot) => {
-                            let r = Region { slot, kind, cx: cell.0 as f32 + 0.5, cy: cell.1 as f32 + 0.5, hw: 1.5, hh: 1.5 };
+                            let r = Region { slot, kind, cx: cell.0 as f32 + 0.5, cy: cell.1 as f32 + 0.5, hw: 1.5, hh: 1.5, range: None };
                             self.edit(&format!("add {}", region_name(kind)), |l| l.regions.push(r));
                             self.obj_sel = Some(Sel::Region(slot));
                         }
@@ -445,6 +445,19 @@ impl LevelDoc {
                 ui.add(egui::DragValue::new(&mut e.h).range(0..=255));
                 ui.end_row();
             }
+            // port addition (sidecar MAPS/LEVEL0-N.TXT): levels and height ranges for crossings
+            let wants_level = matches!(e.kind, 2 | 3 | 5 | 10) || (e.kind == 9 && e.sub != 0);
+            let wants_range = e.kind == 1 || (e.kind == 9 && e.sub == 0);
+            if wants_level || all || e.level.is_some() {
+                ui.label("level").on_hover_text("port addition: stands on the highest surface at or below this height (cells); for a waypoint, the route's level there (crossings)");
+                opt_height(ui, &mut e.level, self.level.floor_below(e.x as f32 + 0.5, e.y as f32 + 0.5, 255.0));
+                ui.end_row();
+            }
+            if wants_range || all || e.range.is_some() {
+                ui.label("height range").on_hover_text("port addition: a wall segment (set on its first point) or checkpoint counts only for crafts at heights in this range (cells)");
+                opt_range(ui, &mut e.range);
+                ui.end_row();
+            }
         });
         ui.checkbox(&mut self.all_fields, "show all fields");
         if e != orig {
@@ -510,6 +523,9 @@ impl LevelDoc {
                 ui.add(egui::DragValue::new(&mut r.hh).speed(0.5).range(0.5..=64.0).fixed_decimals(1));
             });
             ui.end_row();
+            ui.label("height range").on_hover_text("port addition: the charger works only for crafts at heights in this range (cells)");
+            opt_range(ui, &mut r.range);
+            ui.end_row();
         });
         if r.kind == 4 {
             ui.label(egui::RichText::new("The starting grid uses the start-tile cells (texture 122) inside the area, front row nearest the start/finish checkpoint.").small().color(Color32::GRAY));
@@ -551,4 +567,38 @@ impl LevelDoc {
             self.centre_on(e.x as f32 + 0.5, e.y as f32 + 0.5);
         }
     }
+}
+
+/// Port addition: an optional height (cells) with a checkbox; `default` when switched on.
+fn opt_height(ui: &mut egui::Ui, v: &mut Option<f32>, default: f32) {
+    ui.horizontal(|ui| {
+        let mut on = v.is_some();
+        if ui.checkbox(&mut on, "").changed() {
+            *v = on.then_some((default * 4.0).round() / 4.0);
+        }
+        if let Some(h) = v {
+            ui.add(egui::DragValue::new(h).speed(0.05).range(0.0..=255.0).fixed_decimals(2));
+        } else {
+            ui.label(egui::RichText::new("top surface").small().color(Color32::GRAY));
+        }
+    });
+}
+
+/// Port addition: an optional height range (cells) with a checkbox.
+fn opt_range(ui: &mut egui::Ui, v: &mut Option<(f32, f32)>) {
+    ui.horizontal(|ui| {
+        let mut on = v.is_some();
+        if ui.checkbox(&mut on, "").changed() {
+            *v = on.then_some((0.0, 1.5));
+        }
+        if let Some((lo, hi)) = v {
+            ui.add(egui::DragValue::new(lo).speed(0.05).range(-1000.0..=1000.0).fixed_decimals(2).prefix("from "));
+            ui.add(egui::DragValue::new(hi).speed(0.05).range(-1000.0..=1000.0).fixed_decimals(2).prefix("to "));
+            if *hi < *lo {
+                *hi = *lo;
+            }
+        } else {
+            ui.label(egui::RichText::new("all heights").small().color(Color32::GRAY));
+        }
+    });
 }

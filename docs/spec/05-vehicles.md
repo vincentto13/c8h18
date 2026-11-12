@@ -569,6 +569,10 @@ visual effect** (no flame, no thing is created).
   waypoint after 100 ticks.
 - Dropped collectables are placed on a ring of radius 1 cell around the wreck instead of being
   thrown.
+- Port addition, crossings (chapter 01 §9.7): wall segments and chargers may carry a height range,
+  blocks may stand on a flat base; on such layered levels a craft on a block top feels no terrain slope
+  (§3.e, §3.i), a craft under a block is held 0.25 below its underside (§3.l), and recovery puts the
+  craft back on its own level (§8). Levels without the addition are unchanged.
 
 ## Known gaps
 

@@ -51,7 +51,7 @@ impl World {
         // finished crafts drive on (spec 04 §5.1)
         if c.finish_place > 0 && c.hold > 0 {
             if !c.autopilot_locked {
-                c.waypoint = self.track.nearest(c.pos[0], c.pos[1]);
+                c.waypoint = self.track.along_route(c.waypoint, c.pos[0], c.pos[1], c.pos[2]);
                 c.ap_first = false;
             }
             c.autopilot_locked = true;
@@ -201,7 +201,7 @@ impl World {
                     c.recovery_wait += 1;
                     if c.recovery_wait >= 100 {
                         c.recovery_wait = 0;
-                        let wp = self.track.nearest(c.pos[0], c.pos[1]);
+                        let wp = self.track.along_route(c.waypoint, c.pos[0], c.pos[1], c.pos[2]);
                         if wp != 0 {
                             let w = self.track.wps[wp];
                             c.pos = [w.x, w.y, w.floor + 0.5];
@@ -335,7 +335,11 @@ impl World {
         let h2 = self.lvl.corner_h(cx + 1, cy);
         let h3 = self.lvl.corner_h(cx + 1, cy + 1);
         let h4 = self.lvl.corner_h(cx, cy + 1);
-        let slope = [h1 - h2 - h3 + h4, h1 + h2 - h3 - h4];
+        let mut slope = [h1 - h2 - h3 + h4, h1 + h2 - h3 - h4];
+        // port addition, layered levels: a craft on a block top (a deck) feels no terrain slope
+        if self.track.layered && self.lvl.surface_below(c.pos[0], c.pos[1], c.pos[2]) > self.lvl.terrain_height(c.pos[0], c.pos[1]) + 0.01 {
+            slope = [0.0; 2];
+        }
         // f momentum
         let mut delta = [thrust[0] + slope[0] / 64.0, thrust[1] + slope[1] / 64.0];
         let bf = (c.behind - 100) as f32 / 100.0;
@@ -431,6 +435,22 @@ impl World {
             }
         } else {
             c.airborne = true;
+        }
+        // port addition, layered levels: a craft under a deck stays below its underside (it can't
+        // be lifted into the blocks and then onto the deck)
+        if self.track.layered {
+            if let Some(top) = self.lvl.ceiling_above(nx, ny, ground + 0.05) {
+                let lim = (top - 0.25).max(ground + 0.05);
+                if y > lim {
+                    y = lim;
+                }
+                for s in &mut c.sensors {
+                    if s.0 > lim {
+                        s.0 = lim;
+                        s.1 = s.1.min(0.0);
+                    }
+                }
+            }
         }
         mv[2] = y - c.pos[2];
         // m roll
@@ -551,10 +571,12 @@ impl World {
             let floor = self.lvl.surface_below(nx, ny, zpos.max(h) + 0.3);
             c.sensor_floor[k] = floor;
             let rest = floor + 50.0 * U;
+            // port addition, layered levels: a sensor on a block top (a deck) ignores the terrain's slope
+            let on_block = self.track.layered && floor > self.lvl.terrain_height(nx, ny) + 0.01;
             if zpos >= rest {
                 zpos += zdisp;
             } else {
-                if self.lvl.attr(nx.floor() as i32, ny.floor() as i32) & 4 == 0 {
+                if self.lvl.attr(nx.floor() as i32, ny.floor() as i32) & 4 == 0 && !on_block {
                     let (cx, cy) = (nx.floor() as i32, ny.floor() as i32);
                     let h1 = self.lvl.corner_h(cx, cy);
                     let h2 = self.lvl.corner_h(cx + 1, cy);
@@ -614,6 +636,10 @@ impl World {
             }
             let p2 = [p[0] + mv[0], p[1] + mv[1]];
             for w in &self.track.walls {
+                // port addition: a wall with a height range stops only crafts inside it
+                if !w.applies(c.pos[2]) {
+                    continue;
+                }
                 let minx = w.a[0].min(w.b[0]) - 1.0;
                 let maxx = w.a[0].max(w.b[0]) + 1.0;
                 let miny = w.a[1].min(w.b[1]) - 1.0;
@@ -1016,7 +1042,7 @@ impl World {
             return;
         }
         let t = c.target_cp.min(self.track.checkpoints.len() - 1);
-        if self.track.checkpoints[t].contains(c.pos[0], c.pos[1]) {
+        if self.track.checkpoints[t].holds(c.pos[0], c.pos[1], c.pos[2]) {
             c.prev_cp = c.last_cp;
             c.last_cp = t;
             c.target_cp = self.track.next_checkpoint(t);
@@ -1129,3 +1155,7 @@ mod tests {
         assert!(report.iter().all(|r| r.contains(": 0 of")), "{}", report.join("\n"));
     }
 }
+
+#[cfg(test)]
+#[path = "crossing_tests.rs"]
+mod crossing_tests;

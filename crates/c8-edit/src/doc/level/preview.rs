@@ -218,15 +218,21 @@ impl LevelDoc {
                     let Some(n) = by_index.get(&(e.link as usize)) else { continue };
                     let (nx, ny) = (n.x as f32 + 0.5, n.y as f32 + 0.5);
                     if e.sub == 0 {
-                        // a wall: a low fence between the points
+                        // a wall: a low fence between the points (port addition: a wall with a
+                        // height range stands on the surface below its range's bottom + 1)
                         let c = srgb_to_linear([255, 60, 60], 1.0);
-                        let (h0, h1) = (ground(x, y), ground(nx, ny));
+                        let at = |x: f32, y: f32| match e.range {
+                            Some((lo, _)) if lo.is_finite() => l.surface_below(x, y, lo + 1.0) + 0.15,
+                            _ => ground(x, y),
+                        };
+                        let (h0, h1) = (at(x, y), at(nx, ny));
                         seg([x, h0, y], [nx, h1, ny], c);
                         seg([x, h0 + 0.6, y], [nx, h1 + 0.6, ny], c);
                         seg([x, h0, y], [x, h0 + 0.6, y], c);
                     } else {
                         let c = if e.sub == 6 { srgb_to_linear([255, 0, 255], 1.0) } else { srgb_to_linear([0, 230, 230], 1.0) };
-                        seg([x, ground(x, y) + 0.3, y], [nx, ground(nx, ny) + 0.3, ny], c);
+                        // port addition: waypoints with a level are drawn at it
+                        seg([x, l.entity_ground(e) + 0.45, y], [nx, l.entity_ground(n) + 0.45, ny], c);
                     }
                 }
                 1 => {
@@ -239,7 +245,7 @@ impl LevelDoc {
                 }
                 5 | 10 => {
                     let c = if e.kind == 5 { srgb_to_linear([60, 255, 60], 1.0) } else { srgb_to_linear([255, 150, 0], 1.0) };
-                    let h = ground(x, y);
+                    let h = l.entity_ground(e) + 0.15;
                     seg([x, h, y], [x, h + 1.2, y], c);
                 }
                 _ => {}

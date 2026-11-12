@@ -91,11 +91,13 @@ fn quad(out: &mut Vec<Vertex>, p: [[f32; 3]; 4], l: [f32; 4], uv_entry: usize, t
 pub fn build_mesh(lvl: &Level, opts: &MeshOpts) -> Vec<Vertex> {
     let mut out = Vec::with_capacity(MAP_W * MAP_H * 6 + 100_000);
     let light = |x: i32, y: i32| lvl.cell(x, y).light as f32 / 256.0;
-    let has_block = |x: i32, y: i32, k: usize| -> bool {
+    // a neighbour's block hides a side only when both stand on the same base (port addition: a
+    // flat block base, spec 01 §9.7)
+    let has_block = |x: i32, y: i32, k: usize, base: Option<u16>| -> bool {
         if x < 0 || y < 0 || x >= MAP_W as i32 || y >= MAP_H as i32 {
             return false;
         }
-        lvl.column(x, y).map(|c| c.mask & (1 << k) != 0).unwrap_or(false)
+        lvl.cell(x, y).base == base && lvl.column(x, y).map(|c| c.mask & (1 << k) != 0).unwrap_or(false)
     };
     for y in 0..MAP_H as i32 {
         for x in 0..MAP_W as i32 {
@@ -105,12 +107,18 @@ pub fn build_mesh(lvl: &Level, opts: &MeshOpts) -> Vec<Vertex> {
             let l = [light(x, y), light(x + 1, y), light(x + 1, y + 1), light(x, y + 1)];
             let odd = (x + y) & 1 != 0;
             let pt = |k: usize, dz: f32| [xy[k].0 as f32, h[k] + dz, xy[k].1 as f32];
+            // block corners: on the terrain corners, or all on the cell's flat base (port addition)
+            let flat = c.base.map(|b| b as f32 / 256.0);
+            let bp = |k: usize, dz: f32| match flat {
+                Some(b) => [xy[k].0 as f32, b + dz, xy[k].1 as f32],
+                None => pt(k, dz),
+            };
             match lvl.column(x, y).copied() {
                 None => {
                     quad(&mut out, [pt(0, 0.), pt(1, 0.), pt(2, 0.), pt(3, 0.)], l, c.orient as usize, (c.tex as u32) & 255, odd, opts);
                 }
                 Some(col) => {
-                    if col.mask & 1 == 0 {
+                    if col.mask & 1 == 0 || flat.is_some() {
                         let tex = col.floor_tex.max(0) as u32 & 255;
                         quad(&mut out, [pt(0, 0.), pt(1, 0.), pt(2, 0.), pt(3, 0.)], l, c.orient as usize, tex, odd, opts);
                     }
@@ -123,28 +131,28 @@ pub fn build_mesh(lvl: &Level, opts: &MeshOpts) -> Vec<Vertex> {
                         let (z0, z1) = (k as f32, k as f32 + 1.0);
                         // top
                         if col.mask & (1 << (k + 1)) == 0 {
-                            quad(&mut out, [pt(0, z1), pt(1, z1), pt(2, z1), pt(3, z1)], l, compose_top(c.orient, b.orient[4]), b.tex[4] as u32, odd, opts);
+                            quad(&mut out, [bp(0, z1), bp(1, z1), bp(2, z1), bp(3, z1)], l, compose_top(c.orient, b.orient[4]), b.tex[4] as u32, odd, opts);
                         }
                         // bottom
-                        if k > 0 && col.mask & (1 << (k - 1)) == 0 {
-                            quad(&mut out, [pt(3, z0), pt(2, z0), pt(1, z0), pt(0, z0)], l, compose_bottom(c.orient, b.orient[5]), b.tex[5] as u32, odd, opts);
+                        if (k > 0 && col.mask & (1 << (k - 1)) == 0) || (k == 0 && flat.is_some()) {
+                            quad(&mut out, [bp(3, z0), bp(2, z0), bp(1, z0), bp(0, z0)], l, compose_bottom(c.orient, b.orient[5]), b.tex[5] as u32, odd, opts);
                         }
                         // sides, seen from outside: top-left, top-right, bottom-right, bottom-left
                         // north (row y edge, corners 0,1), seen from the north: left = east (1), right = west (0)
-                        if !has_block(x, y - 1, k) {
-                            quad(&mut out, [pt(1, z1), pt(0, z1), pt(0, z0), pt(1, z0)], [l[1], l[0], l[0], l[1]], 0, b.tex[0] as u32, false, opts);
+                        if !has_block(x, y - 1, k, c.base) {
+                            quad(&mut out, [bp(1, z1), bp(0, z1), bp(0, z0), bp(1, z0)], [l[1], l[0], l[0], l[1]], 0, b.tex[0] as u32, false, opts);
                         }
                         // east (x+1 edge, corners 1,2), seen from the east: left = south (2), right = north (1)
-                        if !has_block(x + 1, y, k) {
-                            quad(&mut out, [pt(2, z1), pt(1, z1), pt(1, z0), pt(2, z0)], [l[2], l[1], l[1], l[2]], 0, b.tex[1] as u32, false, opts);
+                        if !has_block(x + 1, y, k, c.base) {
+                            quad(&mut out, [bp(2, z1), bp(1, z1), bp(1, z0), bp(2, z0)], [l[2], l[1], l[1], l[2]], 0, b.tex[1] as u32, false, opts);
                         }
                         // south (row y+1 edge, corners 3,2), seen from the south: left = west (3), right = east (2)
-                        if !has_block(x, y + 1, k) {
-                            quad(&mut out, [pt(3, z1), pt(2, z1), pt(2, z0), pt(3, z0)], [l[3], l[2], l[2], l[3]], compose_top(0, b.orient[2]), b.tex[2] as u32, false, opts);
+                        if !has_block(x, y + 1, k, c.base) {
+                            quad(&mut out, [bp(3, z1), bp(2, z1), bp(2, z0), bp(3, z0)], [l[3], l[2], l[2], l[3]], compose_top(0, b.orient[2]), b.tex[2] as u32, false, opts);
                         }
                         // west (x edge, corners 0,3), seen from the west: left = north (0), right = south (3)
-                        if !has_block(x - 1, y, k) {
-                            quad(&mut out, [pt(0, z1), pt(3, z1), pt(3, z0), pt(0, z0)], [l[0], l[3], l[3], l[0]], 0, b.tex[3] as u32, false, opts);
+                        if !has_block(x - 1, y, k, c.base) {
+                            quad(&mut out, [bp(0, z1), bp(3, z1), bp(3, z0), bp(0, z0)], [l[0], l[3], l[3], l[0]], 0, b.tex[3] as u32, false, opts);
                         }
                     }
                 }

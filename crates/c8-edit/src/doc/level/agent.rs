@@ -293,7 +293,7 @@ impl LevelDoc {
                 let kind = region_kind(a.get("kind").unwrap_or(&Value::Null))?;
                 let (x0, y0, x1, y1) = (req_f(a, "x0")? as f32, req_f(a, "y0")? as f32, req_f(a, "x1")? as f32, req_f(a, "y1")? as f32);
                 let slot = self.level.free_region_slot().ok_or("all 10 region records are in use")?;
-                let r = Region { slot, kind, cx: (x0 + x1) / 2.0, cy: (y0 + y1) / 2.0, hw: (x1 - x0).abs() / 2.0, hh: (y1 - y0).abs() / 2.0 };
+                let r = Region { slot, kind, cx: (x0 + x1) / 2.0, cy: (y0 + y1) / 2.0, hw: (x1 - x0).abs() / 2.0, hh: (y1 - y0).abs() / 2.0, range: None };
                 if !(0.0..=MAP_W as f32).contains(&r.cx) || !(0.0..=MAP_H as f32).contains(&r.cy) {
                     return Err("the region lies outside the map".into());
                 }

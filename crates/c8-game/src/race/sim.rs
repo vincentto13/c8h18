@@ -410,7 +410,8 @@ impl World {
         let ents: Vec<_> = self.lvl.entities.iter().filter(|e| e.group == g).copied().collect();
         for e in ents {
             let (cx, cy) = (e.x as f32 + 0.5, e.y as f32 + 0.5);
-            let ground = self.lvl.floor_below(cx, cy, 255.0);
+            // port addition: an entity with a level stands on the surface at or below it
+            let ground = self.lvl.entity_ground(&e);
             let pos = [cx, cy, ground];
             match e.kind {
                 2 => {

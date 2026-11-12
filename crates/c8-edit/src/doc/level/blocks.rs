@@ -9,6 +9,8 @@ pub(super) enum ColMode {
     Select,
     Paint,
     Erase,
+    /// port addition: give cells a flat block base (spec 01 §9.7)
+    Base,
 }
 
 const FACES: [&str; 6] = ["north", "east", "south", "west", "top", "bottom"];
@@ -62,7 +64,11 @@ impl LevelDoc {
             return;
         }
         if !down {
-            self.end_stroke(if self.col_mode == ColMode::Paint { "paint column" } else { "erase column" });
+            self.end_stroke(match self.col_mode {
+                ColMode::Paint => "paint column",
+                ColMode::Base => "block base",
+                _ => "erase column",
+            });
             return;
         }
         let cells = self.brush_cells(x, y);
@@ -83,6 +89,12 @@ impl LevelDoc {
                         let floor = self.level.columns.get(-(t as i32) as usize).map_or(0, |c| c.floor_tex.max(0));
                         self.edit_cell(i, |c| c.tex = floor);
                     }
+                }
+            }
+            ColMode::Base => {
+                let b = self.base_value.map(|h| (h * 256.0).round().clamp(0.0, 65535.0) as u16);
+                for (i, _) in cells {
+                    self.edit_cell(i, |c| c.base = b);
                 }
             }
             ColMode::Select => {}
@@ -107,7 +119,27 @@ impl LevelDoc {
             ui.selectable_value(&mut self.col_mode, ColMode::Select, "Select");
             ui.selectable_value(&mut self.col_mode, ColMode::Paint, "Paint");
             ui.selectable_value(&mut self.col_mode, ColMode::Erase, "Erase");
+            ui.selectable_value(&mut self.col_mode, ColMode::Base, "Base").on_hover_text("port addition: blocks of the painted cells stand on a flat height instead of the terrain (decks of crossings)");
         });
+        if self.col_mode == ColMode::Base {
+            ui.horizontal(|ui| {
+                let mut on = self.base_value.is_some();
+                ui.checkbox(&mut on, "flat base");
+                if on != self.base_value.is_some() {
+                    self.base_value = on.then_some(0.0);
+                }
+                if let Some(h) = &mut self.base_value {
+                    ui.add(egui::DragValue::new(h).speed(0.05).range(0.0..=255.0).fixed_decimals(2).suffix(" cells"));
+                } else {
+                    ui.label(egui::RichText::new("painting clears the base").small().color(Color32::GRAY));
+                }
+            });
+        }
+        if let Some((x, y)) = self.hover {
+            if let Some(b) = self.level.cell(x, y).base {
+                ui.label(egui::RichText::new(format!("cell {x}, {y}: blocks on a flat base at {:.2}", b as f32 / 256.0)).small().color(Color32::GRAY));
+            }
+        }
         if self.col_mode != ColMode::Select {
             ui.add(egui::Slider::new(&mut self.brush_radius, 0..=12).text("radius (cells)"));
         }
@@ -115,6 +147,7 @@ impl LevelDoc {
             ColMode::Select => "Click a cell with a column to edit it. Alt+click picks in any mode.",
             ColMode::Paint => "Drag to put the selected column on cells.",
             ColMode::Erase => "Drag to remove columns (cells get the column's floor texture).",
+            ColMode::Base => "Drag to set the flat block base of cells (decks and their ends; saved in the sidecar MAPS/LEVEL0-N.TXT).",
         }).small().color(Color32::GRAY));
         ui.horizontal(|ui| {
             if ui.button("New column").on_hover_text("an empty column (one solid block level to start with)").clicked() {
