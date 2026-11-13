@@ -50,9 +50,9 @@ impl Tmaps {
         Ok(t)
     }
     /// Encode as (DAT, TAB) with unpacked blobs (the loader uses a blob without the RNC signature as
-    /// stored, spec 01 §6).
+    /// stored, spec 01 §6). The 8 header bytes are the port's own (`C8H18TEX`); nothing reads them.
     pub fn encode(&self) -> (Vec<u8>, Vec<u8>) {
-        let mut dat = b"C8H18".to_vec();
+        let mut dat = b"C8H18TEX".to_vec();
         let mut tab = Vec::new();
         for (i, img) in self.images.iter().enumerate() {
             let size = 6 + img.w * img.h;

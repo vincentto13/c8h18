@@ -8,6 +8,14 @@
 use super::files::{i16le, read_raw, u16le, u32le};
 
 pub const SIGNATURE: &[u8; 20] = b"BULLFROG OBJECT DATA";
+/// Port addition: the signature written into new models (files that carry [`SIGNATURE`] keep
+/// it). Both are accepted when reading.
+pub const OWN_SIGNATURE: &[u8; 20] = b"C8H18 OBJECT DATA   ";
+
+/// Does the 36-byte header carry either signature?
+fn signed(d: &[u8]) -> bool {
+    d.len() >= 36 && d[..36].windows(20).any(|w| w == SIGNATURE || w == OWN_SIGNATURE)
+}
 /// Header size; the frame table (if any) and the triangle block follow.
 pub const HEADER: usize = 0x3a;
 /// The triangle's vertex indices are bytes, so a model can use at most 256 vertices (the loader's
@@ -91,7 +99,7 @@ impl Eq for Model {}
 /// shipped files have them (with n = 2, the cone's value; the game never reads it).
 pub fn default_header() -> [u8; HEADER] {
     let mut h = [0u8; HEADER];
-    h[..20].copy_from_slice(SIGNATURE);
+    h[..20].copy_from_slice(OWN_SIGNATURE);
     h[0x24] = 5;
     h[0x25] = 1;
     h[0x2a..0x3a].copy_from_slice(&[0x4f, 0x00, 2, 0, 0, 0, 0x7f, 0x1f, 0x00, 0x00, 0x7f, 0x12, 0x00, 0x00, 0xd9, 0xdd]);
@@ -105,7 +113,7 @@ impl Model {
     }
 
     pub fn parse(d: &[u8]) -> Result<Model, String> {
-        if d.len() < HEADER || !d[..36].windows(20).any(|w| w == SIGNATURE) {
+        if d.len() < HEADER || !signed(d) {
             return Err("not an object file".into());
         }
         let short = |what: &str| format!("file too short for its {what}");
@@ -211,8 +219,8 @@ impl Model {
         let n = self.verts.len();
         let frames = 1 + self.more_frames.len();
         let mut d = self.header.to_vec();
-        if !d[..36].windows(20).any(|w| w == SIGNATURE) {
-            d[..20].copy_from_slice(SIGNATURE);
+        if !signed(&d) {
+            d[..20].copy_from_slice(OWN_SIGNATURE);
         }
         d[0x18..0x1c].copy_from_slice(&(tri.len() as u32).to_le_bytes());
         d[0x1c..0x20].copy_from_slice(&((n * 6) as u32).to_le_bytes());
@@ -392,6 +400,12 @@ mod tests {
         let e = m.to_bytes().unwrap_err();
         assert!(e.contains("256"), "{e}");
         assert!(Model::parse(b"BULLFROG OBJECT DATA").is_err());
+        let own = Model::default().to_bytes().unwrap();
+        assert_eq!(&own[..20], OWN_SIGNATURE);
+        assert!(Model::parse(&own).is_ok());
+        let mut orig = own.clone();
+        orig[..20].copy_from_slice(SIGNATURE);
+        assert_eq!(&Model::parse(&orig).unwrap().to_bytes().unwrap()[..20], SIGNATURE, "an original file keeps its signature");
         let mut short = Model::default().to_bytes().unwrap();
         short[0x18] = 50; // triangle block beyond the end
         assert!(Model::parse(&short).is_err());

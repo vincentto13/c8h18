@@ -196,7 +196,8 @@ RNC, unpacked exactly **83968 bytes = 328 rows × 256**; every row is a 256-entr
 The sentinel's offset is the DAT file size; its other fields are 0. Image i's blob is `DAT[offset(i) .. offset(i+1))`.
 The game hard-codes 48 images.
 
-**DAT**: starts with the 8 ASCII bytes `BULLFROG` (the first TAB offset is 8), then the blobs. Each blob is RNC-packed
+**DAT**: starts with the 8 ASCII bytes `BULLFROG` (the first TAB offset is 8; nothing reads them, and files
+written by the port carry `C8H18TEX` instead), then the blobs. Each blob is RNC-packed
 (a blob without the signature would be used as stored). Unpacked image:
 
 | Offset | Size | Field |
@@ -241,7 +242,7 @@ Layout (not packed):
 
 | Offset | Size | Field |
 |---|---|---|
-| 0x00 | 20 | ASCII `BULLFROG OBJECT DATA` (the loader only searches the 36-byte header for this text) |
+| 0x00 | 20 | ASCII `BULLFROG OBJECT DATA` (the loader only searches the 36-byte header for this text). Port: new models get `C8H18 OBJECT DATA` padded with 3 spaces; both are accepted, and a file keeps the one it has |
 | 0x14 | u32 | 0 |
 | 0x18 | u32 | triangle block size in bytes |
 | 0x1c | u32 | vertex block size = vertex count × 6 |
