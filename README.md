@@ -1,8 +1,10 @@
 # C8H18
 
-A recreation of the 1995 hover-craft combat racer from the specification in `docs/spec/`, running on the
-original data files in `resources/` or on our own assets made from scratch in `assets/custom/` (see
-[Asset packages](#asset-packages)).
+An unofficial, fan-made reimplementation of *Hi-Octane*, the hover-craft combat racer from 1995, built
+from the specification in `docs/spec/`. It runs on the data files of your own copy of the original
+game (`resources/`) or, without them, on our own assets made from scratch in `assets/custom/` (see
+[Asset packages](#asset-packages)). No part of the original game is included. See
+[Trademarks](#trademarks).
 
 - Rendering: `wgpu` (Metal / Vulkan / DX12). Textures stay 8-bit palette indices and the shaders go
   through the per-track light table, so lighting and haze match the original. The 3D view uses the
@@ -695,6 +697,14 @@ The app icon, `packaging/macos/AppIcon.icns`, is drawn by the local generator `a
   measurements taken from the original files are layout numbers: the font sheets' glyph widths,
   heights and ink boxes (so text lays out as before) and the sound effects' loudness levels (so
   the mix keeps its balance); the glyphs, waveforms, timbres and tunes are new.
+
+### Trademarks
+
+C8H18 is an independent fan project. It is not affiliated with, endorsed by or sponsored by
+Electronic Arts or Bullfrog Productions. *Hi-Octane* was developed by Bullfrog Productions and
+published by Electronic Arts in 1995; the name is used here only to say which game this project
+reimplements and whose data files it can read. *Hi-Octane*, Bullfrog and Electronic Arts are
+trademarks of their respective owners.
 
 ## Debug automation
 
